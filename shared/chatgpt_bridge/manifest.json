@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Desktop Pet ChatGPT Bridge",
+  "version": "1.0.0",
+  "description": "Local-first ChatGPT conversation capture and Context Hygiene status.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://127.0.0.1:8000/*"],
+  "background": {
+    "service_worker": "bridge_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["conversation_reader.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Context Hygiene",
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Context Hygiene</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div>
+            <div class="title">Context Hygiene</div>
+            <div class="subtitle">ChatGPT Context Monitor</div>
+        </div>
+        <div id="statusBadge" class="status">--</div>
+    </div>
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-label">Messages</div>
+            <div id="messageCount" class="stat-value">-</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Characters</div>
+            <div id="totalChars" class="stat-value">-</div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-title">风险原因</div>
+        <div id="reasons">正在读取当前聊天...</div>
+    </div>
+    <div id="handoff" class="handoff"></div>
+    <div id="connectionNotice" class="connection-notice"></div>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>
