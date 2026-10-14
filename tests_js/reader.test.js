@@ -123,6 +123,36 @@ test('reader waits until an unsaved chat has a real conversation ID', async () =
     assert.equal(r.sent[0].conversationId, 'assigned-new-id');
 });
 
+for (const temporary of ['local-chatgpt:draft-1', 'local-chatgpt%3Adraft-1']) {
+    test(`reader waits through ${temporary} and reads full canonical messages`, async () => {
+        const r = makeReader(`/c/${temporary}`, [
+            {key: 'turn-0:0:user', content: '完整用户问题'},
+            {key: 'turn-0:2:assistant', content: 'ChatGPT 说：完整模型回答\n```python\nprint(1)\n```'},
+        ]);
+        await r.mutation();
+        assert.equal(r.sent.length, 0, 'temporary IDs must not reach the worker');
+        r.page.location.pathname = '/c/canonical-1';
+        await r.routeCheck();
+        assert.equal(r.sent.length, 1);
+        assert.equal(r.sent[0].conversationId, 'canonical-1');
+        assert.equal(r.sent[0].messages[0].content, '完整用户问题');
+        assert.equal(r.sent[0].messages[1].content, '完整模型回答\n```python\nprint(1)\n```');
+    });
+}
+
+test('temporary draft is not copied into a different existing conversation', async () => {
+    const r = makeReader('/c/local-chatgpt%3Adraft-1', [
+        {key: 'same:user', content: 'unrelated draft'},
+    ]);
+    r.page.location.pathname = '/g/project/c/existing-B';
+    r.page.nodes = [{key: 'same:user', content: 'existing B'}];
+    await r.routeCheck();
+    assert.equal(r.sent.length, 1);
+    assert.equal(r.sent[0].conversationId, 'existing-B');
+    assert.equal(r.sent[0].messages.length, 1);
+    assert.equal(r.sent[0].messages[0].content, 'existing B');
+});
+
 test('extension manifest has required MV3 permissions and localhost host access', () => {
     const manifest = JSON.parse(fs.readFileSync(
         path.join(__dirname, '../shared/chatgpt_bridge/manifest.json'), 'utf8'

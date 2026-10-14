@@ -13,7 +13,18 @@ let retryTimer = null;
 function getConversationId() {
     // Works for both /c/<id> and /g/<project>/c/<id> URLs.
     const match = location.pathname.match(/\/c\/([^/]+)/);
-    return match ? match[1] : null;
+    if (!match) return null;
+    let id;
+    try {
+        id = decodeURIComponent(match[1]);
+    } catch (_error) {
+        return null;
+    }
+    // ChatGPT may put /c/local-chatgpt%3A... in the URL before saving a chat.
+    // It is NOT another historical conversation. Wait for the server ID;
+    // never infer aliases from tab identity or matching message bodies.
+    if (id.toLowerCase().startsWith("local-chatgpt")) return null;
+    return match[1];
 }
 
 function readVisibleMessages() {
@@ -57,8 +68,9 @@ function scheduleRetry() {
 function syncConversationCache() {
     const conversationId = getConversationId();
     if (!conversationId) {
-        // New unsaved chats can temporarily lack a /c/ ID. Capture begins
-        // as soon as ChatGPT assigns one; never mix two tabs under "/".
+        // Unsaved chats may lack /c/ or have a local-chatgpt placeholder.
+        // The existing mutation/route triggers read the live DOM once a
+        // server ID appears. Do not carry a draft cache into another route.
         lastSentConversationId = null;
         return;
     }

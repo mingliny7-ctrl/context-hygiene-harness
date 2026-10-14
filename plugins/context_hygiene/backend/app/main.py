@@ -13,6 +13,7 @@ from app.schemas import (
     Message,
 )
 from shared.conversation_store.database import init_db
+from shared.conversation_store.identity import is_temporary_conversation_id
 from shared.conversation_store.store import (
     conversation_exists,
     get_messages,
@@ -56,6 +57,13 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
 
     @app.post("/sync", response_model=ConversationSyncResponse)
     def sync_conversation(request: ConversationSyncRequest):
+        # Older installed Readers may still submit ChatGPT's unsaved URL ID.
+        # Reject before writing; existing historical temporary rows stay intact.
+        if is_temporary_conversation_id(request.conversation_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Temporary ChatGPT conversation: wait for canonical ID",
+            )
         save_observation(
             conversation_id=request.conversation_id,
             messages=[item.model_dump() for item in request.messages],

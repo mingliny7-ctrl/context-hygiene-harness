@@ -3,6 +3,7 @@
 from pathlib import Path
 from shared.conversation_store.database import get_connection
 from shared.conversation_store.database import get_read_connection
+from shared.conversation_store.identity import is_temporary_conversation_id
 
 
 def ensure_conversation(connection, conversation_id: str) -> None:
@@ -44,6 +45,8 @@ def save_observation(
     db_path: str | Path | None = None,
 ) -> None:
     """Atomically merge a partial observation; absence NEVER deletes history."""
+    if is_temporary_conversation_id(conversation_id):
+        raise ValueError("Wait for ChatGPT's canonical conversation ID before saving")
     connection = get_connection(db_path)
     try:
         connection.execute("BEGIN IMMEDIATE")

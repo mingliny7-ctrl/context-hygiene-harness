@@ -10,6 +10,14 @@ from shared.conversation_store.store import (
 )
 
 
+@pytest.mark.parametrize("temporary", ["local-chatgpt:draft", "local-chatgpt%3Adraft"])
+def test_temporary_identity_rejected_without_creating_database(tmp_path, temporary):
+    db = tmp_path / "not-created.db"
+    with pytest.raises(ValueError, match="canonical"):
+        save_observation(temporary, [{"key": "u", "role": "user", "content": "draft"}], db)
+    assert not db.exists()
+
+
 def test_schema_repeatable_and_foreign_key_enforced(tmp_path):
     db = tmp_path / "subdir" / "test.db"
     init_db(db)
