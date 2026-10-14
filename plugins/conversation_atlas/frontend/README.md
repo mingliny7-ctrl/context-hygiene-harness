@@ -1,65 +1,54 @@
-# Conversation Atlas 前端交互原型
+# Conversation Atlas · 真实数据首个切片
 
-本轮只交付可操作的 UI，等待视觉验收。使用现有项目的原生 HTML / CSS / JavaScript 技术栈；无 npm 依赖、构建步骤或后端服务依赖。
+默认读取现有 Conversation Store。视觉基线仍为暂定，完成本轮后等待真实数据 UI 验收。
 
 ## 启动
 
-在仓库根目录执行：
+在仓库根目录运行 `./scripts/start_atlas.ps1`，访问 <http://127.0.0.1:4173/>。复用已有 Python 环境的 FastAPI/uvicorn，只启动独立 Atlas，不调用 Monitor。
 
+备用命令：
 ```powershell
-python -m http.server 4173 --bind 127.0.0.1 --directory plugins/conversation_atlas/frontend
+.\plugins\context_hygiene\.venv\Scripts\python.exe -m uvicorn plugins.conversation_atlas.backend.main:app --host 127.0.0.1 --port 4173
 ```
 
-也可执行 `./scripts/start_atlas.ps1`（自定义端口：`-Port 4180`）。打开 <http://127.0.0.1:4173/>。按 Ctrl+C 停止服务。不要直接双击 HTML：浏览器需要 HTTP 才能加载 ESM 模块。
+真实模式不能再用静态 http.server：它没有 API。数据库默认 `data/conversations.db`，沿用既有 `CONVERSATION_DB_PATH` 环境变量。数据库不存在 / schema 不兼容返回503，不创建或迁移库。按 Ctrl+C 停止服务。
 
-## 验收路径
+## 当前数据与交互
 
-1. 首页：5 个分类粒子星球、每个分类最近的 Conversation、中央动态粒子核心和底部搜索。
-2. 点击“Agent 工程”：核心移至左侧，分类成为锚点，对话在右侧按创建时间纵向展开。
-3. 点击“让 Agent 完成一次真实任务”：再向右展开 3 个 Segment，按阶段顺序排列。
-4. 点击任意 Segment：右侧 Inspector 显示摘要、结论、关键词、时间与模拟消息范围。
-5. 关闭 Inspector：层级和选中节点保留。再次点击节点可重新打开。
-6. 点击 Conversation 详情中的“收拢讨论阶段”，或点击当前分类收拢阶段；点击“返回 Atlas”收拢整个分支。
-7. 搜索“RAG”或“设计”：点击 Conversation / Segment 结果自动展开父级并定位节点。没有匹配时显示空结果提示。
-8. 测试最近对话、指南、动效暂停 / 继续、Tab、Enter、`/` 搜索快捷键和 Esc 关闭。
+- 所有会话进入虚拟“未分类”组；Segment 数组为空，分类 / 阶段 / 结论明确未处理。
+- Conversation ID 等于数据库 conversation_id；标题从首条非空用户消息截取，原文摘录不是 AI 摘要或 ChatGPT 官方标题。
+- 点击会话异步读取详情；点击原文预览 / 查看全部打开本地消息弹窗，用消息键选择器定位具体记录。
+- 消息身份为 (conversation_id, message_key)。完整正文通过 textContent 展示，空正文保留并提示未采集内容，不执行原文 HTML。
+- 排序为首次观察时间 + SQLite rowid，未宣称原始顺序；时间为首次入库 / 最近同步，未宣称 ChatGPT 原始创建时间。
+- 搜索仅匹配已加载标题、摘录、ID，不是全文或语义搜索。
+- 空库、字段缺失、HTTP / JSON / 网络错误有明确状态；失败不回退 Mock。过期详情请求取消，避免快速切换串会话。
+- 原粒子、布局、曲线、Inspector关闭和返回保留。演示模式仅通过 <http://127.0.0.1:4173/?source=demo> 显式开启，清楚标为演示数据。
 
-节点与连线的展开 / 返回使用 720ms 连续过渡；快速重复切换会取消离场删除计时器，复用同 ID 节点。尊重系统“减少动态效果”，页面隐藏或显式暂停时停止动画循环。图谱在窄屏保持左→右结构，可横向滚动；小窗口的详情使用右侧覆盖面板，可关闭后继续探索。当前以桌面体验为主。
+## 契约与独立性
 
-## 文件与边界
+原链路：Reader → Bridge Worker → 现有 /sync → Shared Store / SQLite。
+新增链路：同一个 SQLite → Shared Store 只读查询 → 独立 Atlas API → 原前端图谱。
+Atlas 不导入 Monitor，不使用健康评分，不更改 Reader、Worker、Monitor 或原写入逻辑。
 
-| 文件 | 职责 |
-| --- | --- |
-| `index.html`、`styles.css` | 页面结构、独立样式、响应式布局与过渡 |
-| `app.mjs` | UI 状态、节点选择、Inspector、关键词搜索和键盘交互 |
-| `layout.mjs` | 纯数据驱动的节点 / 连线布局；不读取 DOM，不导入模拟数据 |
-| `particles.mjs` | Canvas 粒子渲染与动画生命周期；不参与业务状态 |
-| `data/mock-atlas.mjs` | 明确标注来源的模拟数据：5 Category / 15 Conversation / 45 Segment |
-| `data/atlas-source.mjs` | 可替换的数据读取边界和本地关键词匹配 |
-| `tests/*.test.mjs` | 数据关联、布局与粒子生命周期的 Node 原生测试 |
-| `icons/` | Heroicons 本地 SVG 图标及 MIT 许可证，运行时无需联网 |
+- GET /api/atlas：schemaVersion=1、provenance.mode=real、categories / conversations / segments、quality计数。分类当前仅虚拟组，阶段为空。节点包含原 ID、原文摘录、UTC ISO 时间或null、messageCount、totalChars、previewMessageKey、未处理状态和质量信息。
+- GET /api/atlas/conversations/{conversation_id}：相同conversationId、原始key / role / content / firstSeenAt / updatedAt数组。404为不存在，503为库不可读。
+- SQLite连接 mode=ro + query_only=ON；不调用init_db、不写原始数据。页面与接口no-store，不向外部模型发送数据。
 
-`Category.id → Conversation.categoryId` 与 `Conversation.id → Segment.conversationId` 为稳定关系。每个 Segment 同时包含模拟 `messageRange` 键和可读 `messageIndexRange`。不能把这些模拟 ID 当作 SQLite 中的真实消息 ID。
+以上端点、字段和 loadAtlas / loadConversation / get_read_connection / list_stored_conversations / read_stored_conversation 属于【🟢 本地自定义名称】及项目契约；sqlite3.connect / FastAPI / StaticFiles / fetch / AbortController 属于【🔒 官方固定 API】。
 
-后续真实 API 只需替换数据边界、验证返回契约，再逐步处理加载 / 错误状态；本轮没有真实 API 调用。数据与布局都不依据某个标题或业务内容写死坐标。
+## 文件与测试
 
-代码命名说明：`loadAtlas`、`searchAtlas`、`computeLayout`、`ParticleField` 以及数据契约字段属于【🟢 本地自定义名称】，由项目统一约定；`ResizeObserver`、`requestAnimationFrame`、`CanvasRenderingContext2D` 等属于【🔒 浏览器官方固定 API】，不可随意改名。本原型没有引入第三方 SDK。
-
-## 模拟与未实现项
-
-- 分类、Conversation、Segment、摘要、结论、时间和消息范围均为模拟；首页统计直接从模拟数据计算。
-- 搜索是本地关键词 AND 匹配，可接收自然语言输入，但不理解自然语言语义，不调用模型；分类关键词也参与关联匹配。
-- 原文跳转明确禁用并标为“尚未接入”。没有伪造跳转或读取真实历史。
-- 本轮不实现数据库、AI 分类 / Segment、全文 / 向量索引、删除 / 恢复或全局时间轴视图。
-- 不读取或修改 `shared/conversation_store`、`shared/chatgpt_bridge`、`plugins/context_hygiene`；不启动 FastAPI。
-
-参考视频在 `E:/Dolode/video_Opus5.5重构了我的创作面板..._0.mp4`，已实际读取 2s、14s、19s 等关键画面。此原型借鉴暗色空间、发光粒子、左侧锚点→右侧曲线和右侧详情；使用轻量 Canvas 3D 投影点阵，没有声称与视频中的火焰材质 / 后处理逐像素一致。视频保留原位置，未加入 Git。
-
-## 测试
-
-在仓库根目录执行：
+backend/main.py负责独立API和同源页面；data/atlas-source.mjs负责来源 / 契约 / 错误；app.mjs接入真实状态和异步详情；messages.mjs负责原文定位；index.html/styles.css仅增加来源与原文样式。layout.mjs、particles.mjs本轮未改。
 
 ```powershell
-node --test plugins/conversation_atlas/frontend/tests/data.test.mjs plugins/conversation_atlas/frontend/tests/layout.test.mjs plugins/conversation_atlas/frontend/tests/particles.test.mjs
+.\plugins\context_hygiene\.venv\Scripts\python.exe -m pytest -q
+node --test plugins/conversation_atlas/frontend/tests/data.test.mjs plugins/conversation_atlas/frontend/tests/layout.test.mjs plugins/conversation_atlas/frontend/tests/particles.test.mjs plugins/conversation_atlas/frontend/tests/real-source.test.mjs
 ```
 
-浏览器实际交互、截图、基线回归结果见仓库根目录 `STATUS.md`、`design-qa.md`，本次交付的截图和日志另保存在对话 outputs 目录。
+## 限制
+
+2026-10-14快照：7条存储会话、238条消息，含1个test-前缀ID及3条测试消息。其余6个ID合计235条消息。38条正文为空，235条fallback键，两个不同ID的已观察正文完全相同。物理/外键检查正常，不代表历史完整、键永久稳定或路由归属全部正确。
+
+修复建议：验证ChatGPT原生消息ID、路由切换归属；增加Reader版本、原始顺序与完整性证据；先保存跨会话相同转录最小复现。不静默去重、不补写空正文、不把观察顺序当原始顺序；历史迁移/回填另行确认。
+
+未实现AI分类、摘要、Segment、全文/语义索引、删除恢复及ChatGPT网页内精确跳转；只定位本地已存储原文。不声称恢复完整历史。详见STATUS.md和本轮验收报告。

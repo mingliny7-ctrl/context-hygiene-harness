@@ -19,6 +19,16 @@ def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     return connection
 
 
+def get_read_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
+    """Read an existing Store without creating files, tables or changing journal mode."""
+    path = Path(db_path) if db_path is not None else DB_PATH
+    connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=15)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only = ON")
+    connection.execute("PRAGMA busy_timeout = 15000")
+    return connection
+
+
 def init_db(db_path: str | Path | None = None) -> None:
     connection = get_connection(db_path)
     try:

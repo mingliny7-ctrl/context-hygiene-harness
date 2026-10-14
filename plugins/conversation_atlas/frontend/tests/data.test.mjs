@@ -53,8 +53,8 @@ test('mock graph has globally stable IDs, complete metadata and valid parents', 
 });
 
 test('loadAtlas creates isolated snapshots and never mutates the fixture', async () => {
-  const first = await loadAtlas();
-  const second = await loadAtlas();
+  const first = await loadAtlas({ mode: 'demo' });
+  const second = await loadAtlas({ mode: 'demo' });
   assert.deepEqual(first, mockAtlas);
   first.categories[0].title = 'changed';
   first.segments[0].outcomes.push('changed');

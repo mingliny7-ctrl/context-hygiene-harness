@@ -42,3 +42,14 @@
 检查清单：所有本轮核心交互已操作；无未解决的 P0/P1/P2；参考差异与模拟边界明确；截图和控制台证据保存；等待用户设计验收。
 
 final result: passed
+
+
+## 第二阶段集成回归 · 2026-10-14
+
+原视觉仍为暂定基线。本轮未改layout.mjs/particles.mjs，保留粒子、曲线、左→右布局和动效。真实模式1个未分类组、0阶段是业务事实，未填入模拟分析。
+
+实测真实节点/异步详情/原文弹窗/key定位/Esc关闭/关闭详情保留/返回/ID搜索/快速选择/空库/503/重试恢复。显式Demo可选中seg-agent-loop-exit；窄屏需先关闭既有覆盖式Inspector。原文入口上移至标题后，相似标题补充短ID。
+
+证据在对话outputs/phase2：real-conversation.jpg、raw-message.jpg、empty-store.jpg、api-unavailable.jpg、demo-regression.jpg和browser-verification.json。尺寸随用户窗口变化，记录实际测量值，不宣称固定1440×960。真实页面无error/warn；故障页503是预期证据。
+
+真实数据下首页更稀疏、7个会话需滚动、窄屏覆盖详情仍需用户验收。数据完整性不由截图证明，限制见STATUS.md。本轮没有无关视觉重设计。

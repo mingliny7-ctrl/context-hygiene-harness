@@ -1,59 +1,55 @@
-# Conversation Atlas 状态 · 2026-10-14
+# Conversation Atlas · 第二阶段首个集成切片 · 2026-10-14
 
-当前阶段：前端交互原型完成，等待用户 UI 验收。暂停后端、数据库、索引和 AI 集成。
+状态：真实Store→独立Atlas API→图谱→原文消息键定位已完成。视觉仍为暂定基线；停止扩展，等待真实数据UI验收。
 
-## 已确认现状与改动边界
+## 检查点与修改边界
 
-- 基线 `main @ 176cebc458c88eb02b56a5d666fb2f12ee0f5143`，开始前工作区干净。
-- 原有前端仅 `shared/chatgpt_bridge/popup.{html,css,js}`，没有 Web 框架、package.json 或 Atlas 页面。
-- 本轮新增独立 `plugins/conversation_atlas/frontend`，沿用原生 HTML/CSS/JavaScript ESM。Canvas 粒子、SVG 数据连线，无前端依赖或构建工具。
-- 未修改 `shared/`、`plugins/context_hygiene/`、现有测试、数据库或 FastAPI；只新增 Atlas 前端 / 启动脚本和更新文档。
-- 本地分支 `feat/conversation-atlas-prototype`；交付检查点 SHA 见对话输出中的 `git-status.txt`。没有推送远程。
+开始前工作区干净，HEAD=c2df4eb。已保存带注释标签atlas-ui-baseline-20261014，不覆盖用户工作。当前分支feat/conversation-atlas-prototype；本轮提交及清单见阶段二Git记录。
 
-## 已实现的可操作功能
+新增独立Atlas API和同源静态页面，共享Store新增只读连接/查询。原Store写入函数、Monitor、Reader、Worker、layout.mjs、particles.mjs未改。没有表变更、迁移、删除、历史补写、AI调用或新增数据库事实源。
 
-- 首页动态粒子核心、分类粒子星球、最近 Conversation 气泡、细曲线与底部居中搜索。
-- `Overview → Category → Conversation → Segment`，展开后核心保留左侧、分类高亮，子节点按列纵向排列，平滑贝塞尔连接。
-- 节点 / 连线 720ms 展开与收拢，稳定 ID 复用；快速返回重开不会遗留不可交互的离场节点。
-- Inspector 摘要、结论、关键词、时间、稳定 ID 与模拟消息范围；关闭保留图谱状态。原始对话入口明确禁用。
-- 始终可见的返回 Atlas、局部阶段收拢、最近对话列表、指南、动效暂停 / 继续。
-- 本地关键词搜索、空结果、搜索结果导航至 Conversation / Segment，自动展开父级并滚动定位。
-- `/` 聚焦搜索、Esc 关闭浮层 / Inspector、按钮键盘访问；系统减少动态效果、隐藏页面和显式暂停时取消 RAF。
-- 桌面优先；窄屏图谱横向滚动，保留左→右关系，Inspector 为可关闭的右侧覆盖面板。
+## 真实数据与证据
 
-## 模拟内容与未实现项
+来源：D:/study/desktop-pet-harness/data/conversations.db。
+conversations主键conversation_id；messages主键(conversation_id,message_key)，外键关联会话，包含role/content/first_seen_at/updated_at。
 
-5 个分类、15 个 Conversation、45 个 Segment 的标题、摘要、结论、时间、消息范围均为模拟。来源与原型能力在页面明确标识；统计从数据计算。`loadAtlas()` 作为异步读取边界，与渲染 / 布局分离。
+7条持久化会话、238条消息，含test-conversation-1及3条测试消息；其余6个ChatGPT形式ID合计235条消息。user118/assistant120；38条空正文，235条fallback-turn键，0空键，0孤立消息。quick_check=ok，外键0违规。
 
-搜索为本地关键词匹配，未接入语义检索、模型或真实历史；分类关键词也参与匹配。未实现原文跳转、数据库集成、AI 分类 / Segment、索引、删除 / 恢复、全局时间轴图谱。不能把模拟消息键当作真实 Store ID。
+两条不同ID的已观察正文完全相同；21组first_seen_at并列。Store明确只保证首次观察顺序，没有完整性、原始时间、官方标题或AI结果字段。因此不能宣称已恢复完整历史或所有路由归属正确。
 
-参考视频已实际读取：`E:/Dolode/video_Opus5.5重构了我的创作面板..._0.mp4`（1920×1080，22.43 秒）。采用其暗色粒子空间、左侧锚点→右侧曲线和右侧 Inspector 结构；核心使用轻量三维投影点阵与琥珀色发光线簇，未复刻视频的火焰材质与后处理，不声称逐像素相同。
+开发前后全表逻辑SHA256均为7fb0e9f45d5b6f23651742232a50915c024f0ffa286c12cc5414ac21c7eb9933。
 
-## 测试证据
+原链路：Reader观察DOM→Worker POST现有/sync→Shared Store合并。短正文不覆盖长正文，缺席不删除；fallback键永久稳定性未验证。审计时8000端口未启动，Atlas读取已有库，不假装新采集成功。
 
-| 检查 | 实际结果 |
-| --- | --- |
-| Atlas Node 原生测试 | 19/19 通过：4 数据、9 布局、6 粒子生命周期 |
-| 原有 Python 测试 | 11 通过，1 个既有 Starlette/httpx 弃用警告 |
-| 原有 JavaScript 测试 | 5 通过 / 3 失败，与修改前一致 |
-| HTTP 首页 / app.mjs | 200；ESM `text/javascript` |
-| 浏览器控制台 | 实测过程 0 error / 0 warn |
-| Git whitespace | `git diff --check` 通过 |
-| 浏览器断点 | 1440×960、1440×720、390×844、1920×1080 |
+采集修复建议：验证ChatGPT原生消息ID与路由切换归属；补充Reader版本、原始顺序、完整性证据；先保存相同转录最小复现。不静默去重、补写空正文或改写顺序。历史迁移/回填另行确认。
 
-原有 JS 失败：`popup.test.js:57` 当前会话恢复断言、`:81` 已删除会话提示断言、`reader.test.js:126` manifest host permission 断言。基线与回归日志均保留。测试中 URL / host permission 使用了字面量 `<...>`；本轮没有修改这些用例或原有逻辑，也没有将失败标成通过。
+## 最小契约与运行链路
 
-浏览器已实际验证：分类→对话→阶段；阶段详情与消息范围；关闭详情不收拢；返回平滑恢复 10 个首页节点；搜索 / 空结果 / 搜索直接定位阶段；最近对话跨分类导航；指南；暂停 / 继续；快捷键；快速收拢重开；局部阶段收拢；窄屏返回入口与搜索栏。
+GET /api/atlas返回schemaVersion=1、real来源、虚拟未分类组、原Conversation ID/摘录/质量计数；Segment为空。GET /api/atlas/conversations/{id}返回相同ID的原始key/role/content/观察时间。
 
-视觉 QA 发现并修复：首页气泡超出画布、粒子过暗、小高度窗口搜索选中节点在视口之外。修复后首页全部 10 个节点在 1388×573 与 1000×500 画布内；1440×720 选中底部 Segment 后完整滚动进入视口。参考对比和最终截图见 `design-qa.md`。
+SQLite mode=ro和query_only=ON，不调用init_db；缺库/坏schema/不可读503，不存在会话404。接口失败显示错误和重试，不回退Mock。详情取消旧请求，防止串会话；原文入口位于标题后，弹窗可按真实消息键定位。原文用textContent展示，空正文保留缺失提示。
 
-## 运行与后续
+标题为原文截取，不是官方标题；摘录不是AI摘要；时间标为首次入库/最近同步；顺序仅为首次观察顺序。分类、阶段、结论未处理。搜索仅加载的标题/摘录/ID。演示仅通过/?source=demo显式开启。
 
-```powershell
-cd D:\study\desktop-pet-harness
-python -m http.server 4173 --bind 127.0.0.1 --directory plugins/conversation_atlas/frontend
-```
+## 验证
 
-访问 <http://127.0.0.1:4173/>。交付时服务保持运行。无需 FastAPI / npm / 数据库。
+- Python21通过（原11+Atlas10），1个既有Starlette/httpx警告。
+- Atlas前端25通过（原19+真实来源6）。
+- 原扩展JS5通过/3失败，与基线相同：popup.test.js:57、:81；reader.test.js:126，既有URL/host permission尖括号相关断言；本轮未改。
+- 两个独立PID启动同一真实库，7个ID及全部238条key/role/content逐条一致，重启前后快照一致。
+- 写入被SQLite拒绝，缺库不创建文件、坏schema不迁移；原写入功能回归通过。
+- 浏览器实测真实节点/异步详情/原文key定位/消息切换/Esc关闭/关闭详情保留图谱/返回/ID搜索/快速选择/空库/503/恢复重试，以及显式Demo阶段交互。
+- 缺失标题/日期、空消息、缺失/重复ID、父子关系、网络/JSON/HTTP错误有自动测试。
+- 真实页面0 error/warn；503测试页初始化错误为预期。
 
-下一步只接收用户视觉与交互反馈。UI 验收通过前不自动进入后端阶段。
+真实业务成功证据来自真实库重启和全量逐条比较。空库/错误夹具只用于异常测试，位于对话work目录，不计入业务记录。
+
+## UI问题与建议
+
+未分类首页比演示稀疏，未伪造分类；相似标题增加短ID区分。7个纵向会话在矮窗口需滚动，后续可按验收反馈调间距。窄屏沿用覆盖式Inspector，需关闭后访问被覆盖的右侧Segment。原文入口已从底部上移，便于发现。本轮不重设计整体布局。
+
+## 启动与未实现
+
+在仓库根目录运行./scripts/start_atlas.ps1，访问http://127.0.0.1:4173/。独立服务复用现有Python依赖，不需要Monitor启动。静态http.server不再支持真实模式。
+
+未实现采集修复、历史补全、AI分类/摘要/Segment、全文/语义索引、删除恢复、ChatGPT网页内精确定位或大规模性能优化。仅定位本地已存储原文。完成此切片后停止扩展，等待UI验收。
