@@ -247,3 +247,13 @@ Keep the MVP small
 Status
 Context Hygiene MVP：可运行 / 持续迭代中
 下一阶段：Context Monitor V2 + Evaluation
+
+Conversation Atlas 前端原型（独立功能，等待 UI 验收）
+在仓库根目录执行：
+```powershell
+python -m http.server 4173 --bind 127.0.0.1 --directory plugins/conversation_atlas/frontend
+```
+打开 http://127.0.0.1:4173/ 。无需启动 FastAPI。
+包含动态粒子图谱、分类 / Conversation / Segment 展开、Inspector 和本地模拟搜索。
+本轮所有 Atlas 数据均为模拟，不读取或修改 Context Hygiene 与 Conversation Store。
+具体操作与测试见 `plugins/conversation_atlas/frontend/README.md`，当前验证结果见 `STATUS.md`。
