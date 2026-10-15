@@ -89,6 +89,30 @@ test('native registration failure has clear message without leaking OS details',
     assert.doesNotMatch(response.error,/sensitive/);
 });
 
+test('unavailable native API reports an actionable code rather than a TypeError',async()=>{
+    const w=makeWorker(()=>assert.fail('No native API available'));
+    delete w.runtime.sendNativeMessage;
+    const response=await w.send('start_collector');
+    assert.equal(response.ok,false);
+    assert.match(response.error,/NATIVE_API_UNAVAILABLE/);
+});
+
+test('native host discovery errors identify the failed stage in Popup feedback',async()=>{
+    for(const [message,code] of [
+        ['Specified native messaging host not found.','HOST_NOT_FOUND'],
+        ['Access to the specified native messaging host is forbidden.','HOST_FORBIDDEN'],
+        ['Failed to start native messaging host.','HOST_START_FAILED'],
+        ['Native host has exited.','HOST_EXITED'],
+    ]) {
+        const w=makeWorker(()=>({ok:true}));
+        w.runtime.lastError={message};
+        const response=await w.send('open_atlas');
+        assert.equal(response.ok,false);
+        assert.ok(response.error.includes(code),response.error);
+        assert.equal(w.tabs.length,0);
+    }
+});
+
 test('Popup keeps pending disabled then shows only confirmed service status',async()=>{
     const nodes=Object.fromEntries(['startCollector','openAtlas','serviceActionNotice'].map(id=>[id,{textContent:'',disabled:false,addEventListener(_,fn){this.click=fn;}}]));
     let finish;

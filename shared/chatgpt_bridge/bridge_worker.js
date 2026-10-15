@@ -164,15 +164,31 @@ let serviceQueue = Promise.resolve();
 
 function nativeRequest(operation) {
     return new Promise((resolve, reject) => {
+        const fail=(code,detail)=>{
+            // Small diagnostic, no chat bodies, paths, environment or credentials.
+            chrome.storage?.local?.set({desktopHostDiagnostic:{code,operation,
+                workerVersion:'1.0.1',extensionId:chrome.runtime.id,at:Date.now()}})?.catch(()=>{});
+            reject(new Error(`[${code}] ${detail}`));
+        };
+        if (typeof chrome.runtime.sendNativeMessage!=='function') {
+            fail('NATIVE_API_UNAVAILABLE','当前扩展未提供本机通信接口，请确认已重载原扩展并授予 nativeMessaging 权限。');
+            return;
+        }
         chrome.runtime.sendNativeMessage(NATIVE_HOST, {operation}, result => {
             const error = chrome.runtime.lastError;
             if (error) {
                 const reason=String(error.message || '');
                 console.warn('[Desktop Host] Native Messaging:',reason);
-                const detail=/forbidden|not allowed/i.test(reason) ? '当前扩展来源未获 Native Host 授权，请核对注册的扩展 ID。'
-                    : /exited|communicating|connection/i.test(reason) ? '本地通信进程启动或握手失败，请检查 Native Host 日志。'
-                    : '无法连接本地启动组件。请确认已注册 Native Host，并重新加载此扩展。';
-                reject(new Error(detail));
+                const [code,detail]=/not found/i.test(reason)
+                    ? ['HOST_NOT_FOUND','Edge 未找到本地启动组件，请核对 Native Host 注册。']
+                    : /forbidden|not allowed/i.test(reason)
+                    ? ['HOST_FORBIDDEN','当前扩展来源未获 Native Host 授权，请核对注册的扩展 ID。']
+                    : /failed to start/i.test(reason)
+                    ? ['HOST_START_FAILED','Edge 无法启动本地通信进程，请检查 Native Host 安装与系统限制。']
+                    : /exited|communicating|connection/i.test(reason)
+                    ? ['HOST_EXITED','本地通信进程启动或握手失败，请检查 Native Host 日志。']
+                    : ['NATIVE_CONNECTION_FAILED','无法连接本地启动组件。请确认已注册 Native Host，并重新加载此扩展。'];
+                fail(code,detail);
             } else if (!result?.ok) {
                 reject(new Error(result?.error || result?.detail || '本地服务检查或启动失败。'));
             } else resolve(result);

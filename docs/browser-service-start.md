@@ -47,6 +47,12 @@ Edge 的 Native Messaging 错误不会作为“已保存”状态。Native Host 
 
 真实 Edge 第一轮：用户确认重载且看到两个按钮，但两项按钮均提示无法连接本地启动组件。采集后端实际正常。已定位并修复“已运行仍强依赖 Host”的交互错误；Edge Native Host 根因与最终验收结果需在交付前补充，当前不得标为通过。
 
+后续诊断：用户手动 Console 返回 `sendNativeMessage is not a function`，并附 Reader 页面的 Non-prefix 警告。该诊断上下文未暴露 Native Messaging API，不能作为 Edge 不支持该 API 或 Host 故障根因的证据。Reader 的警告指向同消息正文观察变化，未作为本轮启动问题的修复范围。本轮 Reader 未修改。
+
+扩展 1.0.1 在 Worker 中检查 Native API 是否可用，并将浏览器错误分为 `NATIVE_API_UNAVAILABLE`、`HOST_NOT_FOUND`、`HOST_FORBIDDEN`、`HOST_START_FAILED`、`HOST_EXITED` 等；Popup 直接显示阶段代码，减少手动 Console 上下文误选。`desktopHostDiagnostic` 仅保存阶段代码、固定操作、Worker 版本、扩展 ID 和时间，不包含原始消息或配置。为真实冷启动验证，仅停止已核实命令完全一致的上轮 A1 Atlas 测试进程，Collector 保持健康；不停止其他项目进程。
+
+用户继续反馈旧的无阶段代码提示后，检查 Edge 当前扩展配置记录：加载路径正确，`service_worker_registration_info.version` 仍为 `1.0.0`，最后更新时间 `2026-10-15T19:02:58.475335+00:00`，早于 1.0.1 Worker/manifest 文件修改时间 `2026-10-15T19:44:37.176075+00:00`。这是旧注册状态证据，仍需实际重载后的按钮结果确认，不作为 Native Host 冷启动通过的证据。
+
 自动化测试覆盖服务隔离、健康前不跳页、重复点击合并、固定图谱 URL、未知来源/操作拒绝、现有服务不要求 Native Host、Popup 按钮状态及既有采集回归。最终数量以交付测试输出为准。
 
 官方协议依据：[Microsoft Edge Native Messaging](https://learn.microsoft.com/zh-cn/microsoft-edge/extensions-chromium/developer-guide/native-messaging)、[Chrome Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)。没有修改浏览器安全策略，也没有开启任意命令接口。

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Desktop Pet ChatGPT Bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local-first ChatGPT conversation capture and Atlas service access.",
   "permissions": ["storage", "tabs", "nativeMessaging"],
   "host_permissions": ["http://127.0.0.1:8000/*", "http://127.0.0.1:4173/*"],
