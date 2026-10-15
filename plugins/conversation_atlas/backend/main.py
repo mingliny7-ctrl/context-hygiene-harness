@@ -56,7 +56,7 @@ def conversation_node(row):
     }
 
 
-def create_app(db_path: str | Path | None = None) -> FastAPI:
+def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path | None = None) -> FastAPI:
     app = FastAPI(title="Conversation Atlas · read-only Store integration")
 
     @app.middleware("http")
@@ -100,6 +100,21 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
                 "completeness": "unknown", "ordering": "not_evaluated",
             },
         }
+
+    @app.get('/api/atlas/analysis/{conversation_id:path}')
+    def completed_analysis(conversation_id: str):
+        # Read-only and model-independent: this route can NEVER invoke inference.
+        from .analysis import AnalysisError, prepare_input, cached_result
+        from .analysis_cache import cache_path
+        try:
+            material, metadata = prepare_input(conversation_id,db_path)
+        except AnalysisError as error:
+            raise HTTPException(status_code=404 if error.code=='CONVERSATION_NOT_FOUND' else 409,
+                                detail={'code':error.code,'message':error.detail}) from error
+        hit = cached_result(conversation_id,material,metadata,cache_path(db_path,analysis_db_path))
+        if hit is None:
+            raise HTTPException(status_code=404,detail='暂无与当前可靠原文匹配的已完成分析；本接口不会调用模型。')
+        return hit
 
     @app.get("/api/atlas/conversations/{conversation_id:path}")
     def detail(conversation_id: str):
