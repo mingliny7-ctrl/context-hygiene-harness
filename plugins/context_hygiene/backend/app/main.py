@@ -16,6 +16,7 @@ from shared.conversation_store.store import (
     get_messages,
     save_observation,
     saved_assistant_count,
+    saved_assistant_preview,
 )
 
 
@@ -38,12 +39,15 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     def build_receipt(conversation_id: str) -> ConversationSyncResponse:
         saved = get_messages(conversation_id, db_path)
         assistant_count, count_status, confirmed_count = saved_assistant_count(saved)
+        preview, preview_status = saved_assistant_preview(saved)
         return ConversationSyncResponse(
             conversation_id=conversation_id,
             message_count=len(saved),
             assistant_reply_count=assistant_count,
             count_status=count_status,
             confirmed_assistant_reply_count=confirmed_count,
+            latest_assistant_preview=preview,
+            latest_assistant_status=preview_status,
         )
 
     @app.post("/sync", response_model=ConversationSyncResponse)

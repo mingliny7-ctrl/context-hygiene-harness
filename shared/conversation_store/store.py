@@ -32,6 +32,19 @@ def ensure_conversation(connection, conversation_id: str) -> None:
     )
 
 
+def saved_assistant_preview(messages: list[dict]) -> tuple[str | None, str]:
+    """No source chronology is stored. Only a singleton needs no ordering inference."""
+    count, reliability, _ = saved_assistant_count(messages)
+    if count == 0:
+        return None, 'empty'
+    if reliability != 'verified' or count != 1:
+        return None, 'order_unverified'
+    answer = next(m['content'] for m in messages
+                  if m['role'] == 'assistant' and m['content'].strip())
+    text = ' '.join(answer.split())
+    return text[:40] + ('…' if len(text) > 40 else ''), 'single_verified_answer'
+
+
 def save_message(
     connection,
     conversation_id: str,

@@ -12,7 +12,7 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
     const nodes = {};
     for (const id of [
         'statusBadge', 'messageCount', 'conversationTitle',
-        'reasons', 'handoff', 'connectionNotice',
+        'reasons', 'latestAnswer', 'connectionNotice',
     ]) {
         nodes[id] = {
             textContent: '', className: '', children: [],
@@ -24,6 +24,8 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
     let onChanged;
     let poll;
     let activeUrl = tabUrl;
+    let onUpdated;
+    let onActivated;
     const context = {
         URL,
         Date,
@@ -35,7 +37,10 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
         },
         fetch: fetchMock,
         chrome: {
-            tabs: {async query() {return [{id: 17, url: activeUrl}];}},
+            tabs: {async query() {return [{id: 17, url: activeUrl}];},
+                onUpdated:{addListener(fn){onUpdated=fn;}},
+                onActivated:{addListener(fn){onActivated=fn;}},
+            },
             storage: {
                 local: {
                     async get(key) {return {[key]: local[key]};},
@@ -54,7 +59,10 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
     };
     vm.runInNewContext(source, context);
     await new Promise(resolve => setImmediate(resolve));
-    return {nodes, local, async navigate(url){activeUrl=url;poll();await new Promise(resolve=>setImmediate(resolve));}};
+    return {nodes, local,
+        navigateNow(url){activeUrl=url;onUpdated(17,{url});},
+        activateNow(url){activeUrl=url;onActivated({tabId:18});},
+        async navigate(url){activeUrl=url;onUpdated(17,{url});await new Promise(resolve=>setImmediate(resolve));}};
 }
 
 test('popup restores current conversation from SQLite status even without local cache', async () => {
@@ -78,7 +86,7 @@ test('popup restores current conversation from SQLite status even without local 
     assert.equal(p.nodes.statusBadge.textContent, '已保存');
     assert.equal(p.nodes.messageCount.textContent, 3);
     assert.match(p.nodes.reasons.textContent, /不代表对话已采集完整/);
-    assert.equal(p.nodes.handoff.textContent, '');
+    assert.equal(p.nodes.latestAnswer.textContent, '对话顺序未确认，暂无法判断最近回答');
     assert.equal(p.local['conversationHealth:B'],undefined,'GET must not create a write acknowledgement');
 });
 
@@ -102,7 +110,7 @@ test('popup never presents cached risk scores when collector is offline', async 
     }, async () => {throw new Error('offline');});
     assert.equal(p.nodes.statusBadge.textContent, '未连接');
     assert.match(p.nodes.reasons.textContent, /无法确认当前保存结果/);
-    assert.equal(p.nodes.handoff.textContent, '');
+    assert.equal(p.nodes.latestAnswer.textContent, '无法确认已保存回答');
 });
 
 test('popup follows SPA title, shows only confirmed native Assistant count and no characters',async()=>{
@@ -123,4 +131,48 @@ test('popup distinguishes backend write failure from offline even with cached SA
         'conversationHealth:A':{conversation_id:'A',status:'SAVED',title:'A',capture_state:'FAILED',assistant_reply_count:2,count_status:'verified'},
     },async()=>({ok:false,status:500}));
     assert.equal(p.nodes.statusBadge.textContent,'保存失败');assert.equal(p.nodes.messageCount.textContent,'暂不可用');
+});
+
+test('preview uses database receipt only, clears synchronously and rejects stale navigation responses',async()=>{
+    let finishB;
+    const receipt = (id, text) => ({ok:true,status:200,async json(){return {
+        conversation_id:id,status:'SAVED',assistant_reply_count:1,count_status:'verified',
+        latest_assistant_status:'single_verified_answer',latest_assistant_preview:text,
+    };}});
+    const p = await makePopup('https://chatgpt.com/c/A',{
+        'conversationHealth:A':{status:'SAVED',latest_assistant_preview:'未经数据库确认的缓存'},
+    },async url=>{
+        if(url.includes('/B/')) return new Promise(resolve=>{finishB=resolve;});
+        return receipt(url.includes('/A/')?'A':'C',url.includes('/A/')?'数据库A':'数据库C');
+    });
+    assert.equal(p.nodes.latestAnswer.textContent,'数据库A');
+    p.navigateNow('https://chatgpt.com/c/B');
+    assert.equal(p.nodes.latestAnswer.textContent,'正在确认已保存回答…');
+    await new Promise(resolve=>setImmediate(resolve));
+    p.activateNow('https://chatgpt.com/c/C');
+    assert.equal(p.nodes.latestAnswer.textContent,'正在确认已保存回答…');
+    await new Promise(resolve=>setImmediate(resolve));
+    finishB(receipt('B','迟到的B'));
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(p.nodes.latestAnswer.textContent,'数据库C');
+});
+
+test('preview fails closed on wrong identity, unknown order and empty saved answers',async()=>{
+    const p = await makePopup('https://chatgpt.com/c/A',{},async url=>({ok:true,status:200,async json(){
+        const id=url.includes('/A/')?'A':url.includes('/B/')?'B':'wrong';
+        return {conversation_id:id,status:'SAVED',count_status:'verified',assistant_reply_count:0,
+            latest_assistant_status:id==='A'?'empty':'order_unverified',latest_assistant_preview:'不能显示的内容'};
+    }}));
+    assert.equal(p.nodes.latestAnswer.textContent,'暂无已保存的模型回答');
+    await p.navigate('https://chatgpt.com/c/B');
+    assert.equal(p.nodes.latestAnswer.textContent,'对话顺序未确认，暂无法判断最近回答');
+    await p.navigate('https://chatgpt.com/c/C');
+    assert.equal(p.nodes.latestAnswer.textContent,'无法确认已保存回答');
+    assert.equal(p.nodes.statusBadge.textContent,'保存失败');
+    await p.navigate('https://chatgpt.com/c/local-chatgpt%3Adraft');
+    assert.equal(p.nodes.latestAnswer.textContent,'无法确认已保存回答');
+    const html=fs.readFileSync(path.join(__dirname,'../shared/chatgpt_bridge/popup.html'),'utf8');
+    assert.doesNotMatch(html,/<a\b|<button\b|id="handoff"/i);
+    assert.match(source,/latestAnswer\.textContent/);
+    assert.doesNotMatch(source,/innerHTML/);
 });

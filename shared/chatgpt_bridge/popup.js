@@ -4,10 +4,11 @@ const statusBadge = document.getElementById("statusBadge");
 const messageCount = document.getElementById("messageCount");
 const conversationTitle = document.getElementById("conversationTitle");
 const reasons = document.getElementById("reasons");
-const handoff = document.getElementById("handoff");
+const latestAnswer = document.getElementById("latestAnswer");
 const connectionNotice = document.getElementById("connectionNotice");
 
 let currentConversationId = null;
+let currentTabId = null;
 let requestSerial = 0;
 const healthKey = id => `conversationHealth:${id}`;
 
@@ -16,6 +17,7 @@ function conversationIdFromUrl(url) {
         const parsed = new URL(url);
         if (parsed.hostname !== "chatgpt.com") return null;
         const match = parsed.pathname.match(/\/c\/([^/]+)/);
+        if (match && decodeURIComponent(match[1]).toLowerCase().startsWith('local-chatgpt')) return null;
         return match ? match[1] : null;
     } catch (_error) {
         return null;
@@ -27,11 +29,10 @@ function waiting(text, state='CAPTURING') {
     statusBadge.className = "status";
     messageCount.textContent = "暂不可用";
     reasons.textContent = text;
-    handoff.textContent = "";
-    handoff.className = "handoff";
+    latestAnswer.textContent = '无法确认已保存回答';
 }
 
-function render(health) {
+function render(health, fromDatabase = false) {
     if (!health) return;
     if (health.status !== "SAVED") {
         waiting("旧风险评分已停用；正在读取采集状态...");
@@ -49,15 +50,35 @@ function render(health) {
         : '仅统计数据库已保存的有效模型回复，不代表对话已采集完整。';
     if (health.unresolvedMessages) reasons.textContent += ' 部分消息身份尚未确认，正在等待页面提供来源。';
     if (health.needsRefresh) reasons.textContent = '此页面仍在运行旧Reader，请刷新这个ChatGPT页面后继续采集。';
-    handoff.textContent = "";
-    handoff.className = "handoff";
+    latestAnswer.textContent = !fromDatabase ? '正在确认已保存回答…'
+        : health.latest_assistant_status === 'empty' ? '暂无已保存的模型回答'
+        : health.latest_assistant_status === 'single_verified_answer' && typeof health.latest_assistant_preview === 'string'
+            ? health.latest_assistant_preview
+            : '对话顺序未确认，暂无法判断最近回答';
+}
+
+function clearConversation() {
+    requestSerial++;
+    currentConversationId = null;
+    conversationTitle.textContent = '正在获取对话名称';
+    messageCount.textContent = '暂不可用';
+    latestAnswer.textContent = '正在确认已保存回答…';
+    statusBadge.textContent = '正在采集';
+    reasons.textContent = '';
+    connectionNotice.textContent = '';
 }
 
 async function refreshPopup() {
     const serial = ++requestSerial;
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (requestSerial !== serial) return;
+    currentTabId = tabs[0]?.id;
     const id = conversationIdFromUrl(tabs[0]?.url);
-    if (id !== currentConversationId) conversationTitle.textContent = '正在获取对话名称';
+    if (id !== currentConversationId) {
+        conversationTitle.textContent = '正在获取对话名称';
+        latestAnswer.textContent = '正在确认已保存回答…';
+        messageCount.textContent = '暂不可用';
+    }
     currentConversationId = id;
     connectionNotice.textContent = "";
     if (!id) {
@@ -91,18 +112,19 @@ async function refreshPopup() {
         }
         const health = await response.json();
         if (requestSerial !== serial || currentConversationId !== id) return;
+        if (health.conversation_id !== id) {
+            const error = new Error('Mismatched conversation receipt');
+            error.httpStatus = 502;
+            throw error;
+        }
         // If Worker posted a newer result while GET was in flight, don't
         // overwrite its newer badge/Popup status with an older response.
         const newest = await chrome.storage.local.get(key);
         if (requestSerial !== serial || currentConversationId !== id) return;
-        if ((newest[key]?.savedAt || 0) > (saved[key]?.savedAt || 0)) {
-            render(newest[key]);
-            return;
-        }
         const metadata = newest[key] || saved[key] || {};
         const state = metadata.capture_state === 'FAILED' ? 'FAILED'
             : metadata.pendingAssistants || metadata.unresolvedMessages || ['CAPTURING','DISCONNECTED'].includes(metadata.capture_state) ? 'CAPTURING' : 'SAVED';
-        render({...metadata, ...health, capture_state:state});
+        render({...metadata, ...health, capture_state:state}, true);
         // Worker owns the write acknowledgement. GET cannot turn an older
         // receipt into a newer save or overwrite an in-flight operation.
     } catch (_error) {
@@ -119,9 +141,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !currentConversationId) return;
     const change = changes[healthKey(currentConversationId)];
     if (change?.newValue) {
-        render(change.newValue);
-        connectionNotice.textContent = "";
+        refreshPopup().catch(() => waiting('无法确认保存结果。', 'DISCONNECTED'));
     }
+});
+
+// Clear synchronously on navigation, before awaiting tab/storage/HTTP reads.
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+    if (tabId === currentTabId && change.url) {
+        clearConversation();
+        refreshPopup().catch(() => waiting('无法确认保存结果。', 'DISCONNECTED'));
+    }
+});
+chrome.tabs.onActivated.addListener(() => {
+    clearConversation();
+    refreshPopup().catch(() => waiting('无法确认保存结果。', 'DISCONNECTED'));
 });
 
 refreshPopup().catch(error => {

@@ -32,6 +32,8 @@ class ConversationSyncResponse(BaseModel):
     assistant_reply_count: int | None
     confirmed_assistant_reply_count: int
     count_status: Literal['verified', 'legacy_identity_unverified']
+    latest_assistant_preview: str | None
+    latest_assistant_status: Literal['empty', 'single_verified_answer', 'order_unverified']
     status: Literal["SAVED"] = "SAVED"
     # Legacy wire fields remain inert for already-installed extension clients.
     reasons: list[str] = Field(default_factory=list)

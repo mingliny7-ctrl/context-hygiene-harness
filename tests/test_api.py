@@ -82,6 +82,31 @@ def test_validation_and_conversation_isolation(tmp_path):
         assert client.get("/conversations/B/status").json()["message_count"] == 1
 
 
+def test_saved_preview_never_infers_chronology_from_insert_order(tmp_path):
+    db = tmp_path / 'preview.db'
+    key = lambda n: f'chatgpt:00000000-0000-0000-0000-{n:012d}:assistant'
+    def answer(n, text):
+        return {'key': key(n), 'role': 'assistant', 'content': text}
+    with TestClient(create_app(db)) as client:
+        def sync(cid, messages):
+            return client.post('/sync', json={'conversation_id':cid, 'messages':messages}).json()
+        assert sync('A', [answer(1, '  ')])['latest_assistant_status'] == 'empty'
+        body = '这是已经持久化的有效回答。' * 8
+        saved = sync('A', [answer(2, body)])
+        assert saved['latest_assistant_status'] == 'single_verified_answer'
+        assert saved['latest_assistant_preview'] == body[:40] + '…'
+        # An older turn discovered later must never become the latest by insertion time.
+        unknown = sync('A', [answer(3, '较早但晚发现的回答')])
+        assert unknown['latest_assistant_status'] == 'order_unverified'
+        assert unknown['latest_assistant_preview'] is None
+        legacy = sync('B', [{'key':'fallback-turn-1:assistant','role':'assistant','content':'旧回答'}])
+        assert legacy['latest_assistant_status'] == 'order_unverified'
+        assert sync('C', [answer(4, '唯一回答')])['latest_assistant_preview'] == '唯一回答'
+    with TestClient(create_app(db)) as restarted:
+        assert restarted.get('/conversations/A/status').json()['latest_assistant_status'] == 'order_unverified'
+        assert restarted.get('/conversations/C/status').json()['latest_assistant_preview'] == '唯一回答'
+
+
 def test_rule_baseline_distinguishes_length_and_two_risks():
     monitor = ContextMonitor()
     just_long = [Message(role="assistant", content="x") for _ in range(81)]

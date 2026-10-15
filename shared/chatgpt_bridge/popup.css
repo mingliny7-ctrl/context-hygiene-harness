@@ -30,15 +30,6 @@ body {
 .section { margin-top: 14px; padding: 12px; background: white; border-radius: 10px; }
 .section-title { margin-bottom: 8px; font-size: 12px; font-weight: bold; color: #777; }
 .reason { margin-top: 6px; font-size: 13px; line-height: 1.5; }
-.handoff { display: none; }
-.handoff.visible {
-    display: block;
-    margin-top: 14px;
-    padding: 12px;
-    border-radius: 10px;
-    background: #fff3f3;
-    font-size: 13px;
-    font-weight: bold;
-}
+#latestAnswer { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .connection-notice { margin-top: 10px; font-size: 12px; color: #986421; }
 .connection-notice:empty { display: none; }
