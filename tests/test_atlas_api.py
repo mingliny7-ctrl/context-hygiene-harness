@@ -46,7 +46,7 @@ def test_real_graph_and_exact_raw_message_identity(tmp_path):
             rows = connection.execute("SELECT message_key, role, content FROM messages WHERE conversation_id='stored-A' ORDER BY first_seen_at,rowid").fetchall()
         assert [(m["key"], m["role"], m["content"]) for m in raw["messages"]] == [tuple(row) for row in rows]
         assert raw["messages"][1]["content"] == "", "empty source records must never disappear or be synthesized"
-        assert raw["quality"]["ordering"] == "first_observed_not_original"
+        assert raw["quality"]["ordering"] == "unresolved"
         assert raw["conversationId"] == node["id"]
 
 

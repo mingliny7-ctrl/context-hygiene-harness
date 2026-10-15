@@ -63,6 +63,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             conversation_id=request.conversation_id,
             messages=[item.model_dump() for item in request.messages],
             db_path=db_path,
+            observed_order=request.observed_order,
         )
         return build_receipt(request.conversation_id)
 

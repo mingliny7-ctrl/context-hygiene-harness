@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Message(BaseModel):
@@ -19,11 +19,20 @@ class ContextHealth(BaseModel):
 
 class BridgeMessage(Message):
     key: str = Field(min_length=1, max_length=1024)
+    source_created_at: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 class ConversationSyncRequest(BaseModel):
     conversation_id: str = Field(min_length=1, max_length=512)
     messages: list[BridgeMessage]
+    observed_order: list[str] | None = None
+
+    @model_validator(mode='after')
+    def validate_observed_order(self):
+        if self.observed_order is not None:
+            if len(set(self.observed_order)) != len(self.observed_order) or not set(self.observed_order) <= {m.key for m in self.messages}:
+                raise ValueError('DOM order must contain unique keys from this observation')
+        return self
 
 
 class ConversationSyncResponse(BaseModel):

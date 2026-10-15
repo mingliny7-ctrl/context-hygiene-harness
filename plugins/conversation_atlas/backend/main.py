@@ -29,7 +29,7 @@ def stored_time(value):
 def quality(message_count, empty_count, fallback_count, conversation_id):
     return {
         "completeness": "unknown",
-        "ordering": "first_observed_not_original",
+        "ordering": "not_evaluated",
         "emptyMessageCount": empty_count,
         "fallbackKeyCount": fallback_count,
         "suspectedTestRecord": conversation_id.startswith("test-"),
@@ -97,7 +97,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
                 "emptyMessageCount": sum(row["empty_message_count"] for row in valid_rows),
                 "fallbackKeyCount": sum(row["fallback_key_count"] for row in valid_rows),
                 "suspectedTestRecordCount": sum(node["quality"]["suspectedTestRecord"] for node in conversations),
-                "completeness": "unknown", "ordering": "first_observed_not_original",
+                "completeness": "unknown", "ordering": "not_evaluated",
             },
         }
 
@@ -109,12 +109,15 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         messages = [{
             "key": item["key"], "role": item["role"], "content": item["content"],
             "firstSeenAt": stored_time(item["first_seen_at"]), "updatedAt": stored_time(item["updated_at"]),
+            "sourceCreatedAt": item['source_created_at'], "sourceOrder": item['source_order'],
+            "orderGroup": item['order_group'], "relativeOrder": item['relative_order'], "orderStatus": item['order_status'],
         } for item in stored["messages"]]
         return {
             "conversationId": stored["conversation_id"], "messages": messages,
             "createdAt": stored_time(stored["created_at"]), "updatedAt": stored_time(stored["updated_at"]),
-            "quality": quality(len(messages), sum(not item["content"].strip() for item in messages),
+            "quality": {**quality(len(messages), sum(not item["content"].strip() for item in messages),
                                sum(item["key"].startswith("fallback-turn-") for item in messages), conversation_id),
+                        'ordering': stored['ordering']},
         }
 
     app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="atlas-frontend")

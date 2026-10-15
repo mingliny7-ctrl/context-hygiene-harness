@@ -1,10 +1,12 @@
 """Conversation-level operations; browser/UI and monitoring do not write SQL."""
 
 from pathlib import Path
+import json
 import re
 from shared.conversation_store.database import get_connection
 from shared.conversation_store.database import get_read_connection
 from shared.conversation_store.identity import is_temporary_conversation_id
+from shared.conversation_store.message_order import save_order_evidence, order_messages
 
 
 def saved_assistant_count(messages: list[dict]) -> tuple[int | None, str, int]:
@@ -91,6 +93,7 @@ def save_observation(
     conversation_id: str,
     messages: list[dict],
     db_path: str | Path | None = None,
+    observed_order: list[str] | None = None,
 ) -> None:
     """Atomically merge a partial observation; absence NEVER deletes history."""
     if is_temporary_conversation_id(conversation_id):
@@ -107,6 +110,7 @@ def save_observation(
                 message["role"],
                 message["content"],
             )
+        save_order_evidence(connection, conversation_id, messages, observed_order)
         connection.commit()
     except Exception:
         connection.rollback()
@@ -197,8 +201,12 @@ def read_stored_conversation(conversation_id: str, db_path: str | Path | None = 
             return None
         messages = connection.execute("""
             SELECT message_key AS key, role, content, first_seen_at, updated_at
-            FROM messages WHERE conversation_id = ? ORDER BY first_seen_at, rowid
+            FROM messages WHERE conversation_id = ?
         """, (conversation_id,)).fetchall()
-        return {**dict(conversation), "messages": [dict(row) for row in messages]}
+        # Atlas also supports older stores without migrating them on read.
+        table = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_order_evidence'").fetchone()
+        evidence = connection.execute('SELECT evidence FROM conversation_order_evidence WHERE conversation_id=?', (conversation_id,)).fetchone() if table else None
+        ordered, ordering = order_messages([dict(row) for row in messages], json.loads(evidence[0]) if evidence else None)
+        return {**dict(conversation), "messages": ordered, "ordering": ordering}
     finally:
         connection.close()

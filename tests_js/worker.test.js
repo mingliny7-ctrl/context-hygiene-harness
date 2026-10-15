@@ -7,6 +7,19 @@ const source = fs.readFileSync(
     path.join(__dirname, '../shared/chatgpt_bridge/bridge_worker.js'), 'utf8'
 );
 
+test('worker forwards observed DOM order without using cumulative message array order',async()=>{
+    let posted;
+    const w=makeWorker(async(_url,options)=>{
+        posted=JSON.parse(options.body);
+        return {ok:true,async json(){return {conversation_id:'A',status:'SAVED',message_count:2};}};
+    });
+    await w.emit('A',1,[
+        {key:'late',role:'assistant',content:'late'},
+        {key:'early',role:'user',content:'early'},
+    ],{observedOrder:['early','late']});
+    assert.deepEqual(posted.observed_order,['early','late']);
+});
+
 function makeWorker(fetchMock) {
     const local = {};
     const session = {};

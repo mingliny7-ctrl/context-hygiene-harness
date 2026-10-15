@@ -73,3 +73,15 @@ test('continuous mutations do not indefinitely cancel capture; virtualized nodes
     r.pages.A.nodes=[r.node(10,'assistant','later')];r.mutate();await r.flush();
     assert.ok(r.sent.at(-1).messages.some(m=>m.content==='new saved'));
 });
+
+test('DOM order evidence contains the current window only, not discovery-order cache',async()=>{
+    const r=harness();
+    const first=r.sent[0].observedOrder;
+    assert.equal(first.length,2);
+    r.pages.A.nodes=[r.node(11,'user','older question'),r.node(12,'assistant','older answer'),...r.pages.A.nodes];
+    r.mutate();await r.flush();
+    assert.deepEqual(r.sent.at(-1).observedOrder,r.sent.at(-1).messages.slice(2).map(m=>m.key).concat(first));
+    r.pages.A.nodes=r.pages.A.nodes.slice(0,2);r.mutate();await r.flush();
+    assert.equal(r.sent.at(-1).observedOrder.length,2);
+    assert.equal(r.sent.at(-1).messages.length,4,'raw cumulative collection stays intact');
+});

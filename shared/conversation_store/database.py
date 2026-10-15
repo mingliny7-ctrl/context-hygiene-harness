@@ -67,6 +67,10 @@ def init_db(db_path: str | Path | None = None) -> None:
                     REFERENCES messages(conversation_id, message_key) ON DELETE CASCADE
             )
         """)
+        connection.execute('''CREATE TABLE IF NOT EXISTS conversation_order_evidence (
+            conversation_id TEXT PRIMARY KEY REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+            evidence TEXT NOT NULL
+        )''')
         connection.commit()
     finally:
         connection.close()

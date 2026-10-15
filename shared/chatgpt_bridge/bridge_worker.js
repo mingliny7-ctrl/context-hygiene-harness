@@ -44,6 +44,7 @@ async function syncOnce(conversationId, messages, metadata, serial) {
         body: JSON.stringify({
             conversation_id: conversationId,
             messages,
+            observed_order: metadata.observedOrder,
         }),
     });
     if (!response.ok) {
@@ -101,6 +102,7 @@ async function handleUpdate(message, sender) {
         throw new Error('STALE_READER: refresh this ChatGPT page');
     }
     const metadata = {
+        observedOrder: message.observedOrder,
         title: typeof message.title === 'string' ? message.title.slice(0,512) : '',
         pendingAssistants: message.pendingAssistants || 0,
         unresolvedMessages: message.unresolvedMessages || 0,

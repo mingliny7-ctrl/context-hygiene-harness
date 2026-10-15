@@ -329,7 +329,7 @@ async function loadInspectorMessages(entity, panel) {
     detail.messages.slice(0, 4).forEach((message, index) => {
       const button = el('button', 'message-preview');
       button.dataset.messageKey = message.key;
-      button.append(el('small', '', `观察序号 ${index + 1} · ${message.role}`), el('span', '', message.content.trim() ? message.content.slice(0, 130) : '〔正文为空〕'), el('code', '', message.key));
+      button.append(el('small', '', `${message.sourceOrder != null ? '对话顺序 '+(message.sourceOrder+1) : '相对或历史顺序，详见原文'} · ${message.role}`), el('span', '', message.content.trim() ? message.content.slice(0, 130) : '〔正文为空〕'), el('code', '', message.key));
       button.addEventListener('click', () => openMessages(detail, entity.title, message.key));
       content.append(button);
     });

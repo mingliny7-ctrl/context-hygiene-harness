@@ -1,4 +1,4 @@
-/** Verbatim local Store viewer. Display order is observed order, never an AI Segment. */
+/** Verbatim Store viewer. Unconnected order groups never imply chronology. */
 const make = (tag, className, text) => {
   const node = document.createElement(tag);
   node.className = className || '';
@@ -21,7 +21,11 @@ export function openMessages(detail, title, messageKey = null) {
   const close = make('button', 'quiet-button', '关闭原文');
   close.addEventListener('click', () => dialog.close());
   header.append(heading, close);
-  const note = make('p', 'prototype-note', `${detail.messages.length} 条已存储消息 · 按首次观察顺序排列，非已验证的原始顺序。完整历史未知；空正文保留，fallback 键可能不稳定。`);
+  const ordering = detail.quality?.ordering;
+  const orderNote = ordering === 'source_time' ? '按原始消息创建时间排列'
+    : ordering === 'dom_relative' ? '按页面消息先后排列'
+    : '部分历史顺序未确认；仅同组内已确认的相对顺序可信，组间不代表先后';
+  const note = make('p', 'prototype-note', `${detail.messages.length} 条已存储消息 · ${orderNote}。完整历史未知；空正文保留。`);
   const jump = make('select', 'raw-jump');
   jump.setAttribute('aria-label', '定位原始消息键');
   const list = make('div', 'raw-message-list');
@@ -39,7 +43,10 @@ export function openMessages(detail, title, messageKey = null) {
     article.dataset.messageKey = message.key;
     article.id = `raw-message-${encodeURIComponent(message.key)}`;
     const meta = make('header');
-    meta.append(make('strong', '', `观察序号 ${index + 1} · ${message.role}`), make('code', '', message.key));
+    const position = message.sourceOrder != null ? `对话顺序 ${message.sourceOrder + 1}`
+      : message.relativeOrder != null ? `相对组 ${message.orderGroup + 1} / ${message.relativeOrder + 1} · 组间顺序未知`
+      : '历史顺序未确认';
+    meta.append(make('strong', '', `${position} · ${message.role}`), make('code', '', message.key));
     article.append(meta, make('pre', '', message.content.trim() ? message.content : '〔Store 中正文为空，无法补全未采集内容〕'));
     list.append(article);
   });

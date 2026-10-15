@@ -133,7 +133,8 @@ function syncConversationCache() {
     const observation = readVisibleMessages(root);
     const visibleMessages = observation.messages;
     const title = readTitle(conversationId);
-    const metadata = JSON.stringify([title, observation.pendingAssistants, observation.unresolvedMessages]);
+    const observedOrder = [...new Set(visibleMessages.map(message => message.key))];
+    const metadata = JSON.stringify([title, observation.pendingAssistants, observation.unresolvedMessages, observedOrder]);
     let changed = false;
 
     for (const message of visibleMessages) {
@@ -179,6 +180,7 @@ function syncConversationCache() {
             type: "CONVERSATION_UPDATED",
             conversationId,
             messages,
+            observedOrder,
             title,
             pendingAssistants: observation.pendingAssistants,
             unresolvedMessages: observation.unresolvedMessages,
