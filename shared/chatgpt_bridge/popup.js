@@ -134,7 +134,7 @@ async function refreshPopup() {
         waiting('无法确认当前保存结果，请检查本地采集服务。', _error.httpStatus ? 'FAILED' : 'DISCONNECTED');
         connectionNotice.textContent = saved[key]
             ? "无法确认当前数据库状态，请检查本地采集服务。"
-            : "无法连接本地后端：请启动 FastAPI 并刷新聊天页面。";
+            : "无法连接本地后端：请点击下方“启动采集”。";
     }
 }
 

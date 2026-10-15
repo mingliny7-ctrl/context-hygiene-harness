@@ -33,7 +33,13 @@
         <div id="reasons">正在读取当前聊天...</div>
     </div>
     <div id="connectionNotice" class="connection-notice"></div>
+    <div class="service-actions">
+        <button id="startCollector" type="button">启动采集</button>
+        <button id="openAtlas" type="button">打开图谱</button>
+    </div>
+    <div id="serviceActionNotice" role="status" aria-live="polite"></div>
 </div>
 <script src="popup.js"></script>
+<script src="popup_service_controls.js"></script>
 </body>
 </html>

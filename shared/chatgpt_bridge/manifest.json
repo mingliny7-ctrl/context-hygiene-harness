@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "Desktop Pet ChatGPT Bridge",
   "version": "1.0.0",
-  "description": "Local-first ChatGPT conversation capture and Context Hygiene status.",
-  "permissions": ["storage", "tabs"],
-  "host_permissions": ["http://127.0.0.1:8000/*"],
+  "description": "Local-first ChatGPT conversation capture and Atlas service access.",
+  "permissions": ["storage", "tabs", "nativeMessaging"],
+  "host_permissions": ["http://127.0.0.1:8000/*", "http://127.0.0.1:4173/*"],
   "background": {
     "service_worker": "bridge_worker.js"
   },
@@ -16,7 +16,7 @@
     }
   ],
   "action": {
-    "default_title": "Context Hygiene",
+    "default_title": "Conversation Collector",
     "default_popup": "popup.html"
   }
 }

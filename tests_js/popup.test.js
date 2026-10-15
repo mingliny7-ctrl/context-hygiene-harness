@@ -173,7 +173,10 @@ test('preview fails closed on wrong identity, untracked history and empty saved 
     await p.navigate('https://chatgpt.com/c/local-chatgpt%3Adraft');
     assert.equal(p.nodes.latestAnswer.textContent,'无法确认已保存回答');
     const html=fs.readFileSync(path.join(__dirname,'../shared/chatgpt_bridge/popup.html'),'utf8');
-    assert.doesNotMatch(html,/<a\b|<button\b|id="handoff"/i);
+    const preview=html.match(/<div id="latestAnswer">([\s\S]*?)<\/div>/)[1];
+    assert.doesNotMatch(preview,/<a\b|<button\b/i);
+    assert.doesNotMatch(html,/<a\b|id="handoff"/i);
+    assert.equal((html.match(/<button\b/g)||[]).length,2,'Only the two service buttons are allowed');
     assert.match(source,/latestAnswer\.textContent/);
     assert.doesNotMatch(source,/innerHTML/);
 });

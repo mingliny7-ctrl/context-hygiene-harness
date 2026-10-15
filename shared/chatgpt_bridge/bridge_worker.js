@@ -157,7 +157,81 @@ async function handleUpdate(message, sender) {
     }
 }
 
+const NATIVE_HOST = 'com.context_harness.desktop_host';
+const ATLAS_URL = 'http://127.0.0.1:4173/';
+const serviceActions = new Map();
+let serviceQueue = Promise.resolve();
+
+function nativeRequest(operation) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendNativeMessage(NATIVE_HOST, {operation}, result => {
+            const error = chrome.runtime.lastError;
+            if (error) {
+                const reason=String(error.message || '');
+                console.warn('[Desktop Host] Native Messaging:',reason);
+                const detail=/forbidden|not allowed/i.test(reason) ? '当前扩展来源未获 Native Host 授权，请核对注册的扩展 ID。'
+                    : /exited|communicating|connection/i.test(reason) ? '本地通信进程启动或握手失败，请检查 Native Host 日志。'
+                    : '无法连接本地启动组件。请确认已注册 Native Host，并重新加载此扩展。';
+                reject(new Error(detail));
+            } else if (!result?.ok) {
+                reject(new Error(result?.error || result?.detail || '本地服务检查或启动失败。'));
+            } else resolve(result);
+        });
+    });
+}
+
+async function existingServiceReady(collector) {
+    const base=collector ? 'http://127.0.0.1:8000' : ATLAS_URL.slice(0,-1);
+    const title=collector ? 'Context Harness Conversation Collector' : 'Conversation Atlas · read-only Store integration';
+    try {
+        const get=async path => {
+            const response=await fetch(base+path,{cache:'no-store',redirect:'error',
+                signal:typeof AbortSignal!=='undefined' ? AbortSignal.timeout(1500) : undefined});
+            if (!response.ok) throw new Error('unhealthy');
+            return response.json();
+        };
+        const [schema,health]=await Promise.all([get('/openapi.json'),get(collector ? '/health' : '/api/atlas')]);
+        if (schema?.info?.title!==title) return false;
+        const paths=collector ? ['/sync','/conversations/{conversation_id}/status']
+            : ['/api/atlas','/api/atlas/conversations/{conversation_id}'];
+        if (!paths.every(path=>Object.hasOwn(schema.paths || {},path))) return false;
+        return collector ? health?.status==='ok'
+            : health?.schemaVersion===1 && health?.provenance?.mode==='real' && Array.isArray(health.conversations);
+    } catch (_) {return false;}
+}
+
+function desktopAction(action) {
+    if (!['start_collector','open_atlas'].includes(action)) return Promise.reject(new Error('不支持的服务操作。'));
+    if (serviceActions.has(action)) return serviceActions.get(action);
+    const run = serviceQueue.catch(() => {}).then(async () => {
+        const collector = action === 'start_collector';
+        const service = collector ? 'Collector' : 'Atlas';
+        const suffix = collector ? 'collector' : 'atlas';
+        // A running healthy backend does not require Native Host registration.
+        if (!await existingServiceReady(collector)) {
+            let result = await nativeRequest('check_' + suffix);
+            if (result.service !== service || typeof result.ready !== 'boolean') throw new Error('本地服务身份响应无效。');
+            if (!result.ready) result = await nativeRequest('start_' + suffix);
+            if (!result.ready || result.service !== service) throw new Error(result.detail || '服务未通过健康检查。');
+        }
+        if (!collector) await chrome.tabs.create({url:ATLAS_URL});
+        return {ok:true,ready:true,service,message:collector ? '采集服务运行中' : '图谱服务运行中，已打开图谱'};
+    });
+    serviceActions.set(action,run);
+    serviceQueue=run;
+    run.finally(() => { if (serviceActions.get(action)===run) serviceActions.delete(action); }).catch(() => {});
+    return run;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'DESKTOP_SERVICE') {
+        if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) {
+            sendResponse({ok:false,error:'只允许 Collector Popup 操作本地服务。'});
+            return false;
+        }
+        desktopAction(message.action).then(sendResponse, error => sendResponse({ok:false,error:error.message}));
+        return true;
+    }
     if (message.type !== "CONVERSATION_UPDATED") return false;
     handleUpdate(message, sender).then(
         receipt => sendResponse({ ok: true, conversationId:message.conversationId, receipt }),
