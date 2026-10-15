@@ -11,9 +11,7 @@ const healthKey = conversationId => `conversationHealth:${conversationId}`;
 
 async function setBadge(tabId, status) {
     const styles = {
-        GREEN: { text: "G", color: "#2e7d32" },
-        YELLOW: { text: "Y", color: "#f9a825" },
-        RED: { text: "R", color: "#c62828" },
+        SAVED: { text: "S", color: "#526a85" },
         PENDING: { text: "…", color: "#777777" },
     };
     const style = styles[status] || { text: "!", color: "#777777" };
@@ -70,7 +68,7 @@ async function handleUpdate(message, sender) {
     if (oldMapping[tabKey(tabId)] !== conversationId) {
         // Don't leave conversation A's badge on a tab that switched to B.
         const cached = await chrome.storage.local.get(healthKey(conversationId));
-        await setBadge(tabId, cached[healthKey(conversationId)]?.status || "PENDING");
+        await setBadge(tabId, cached[healthKey(conversationId)]?.status === "SAVED" ? "SAVED" : "PENDING");
     }
 
     // For the SAME conversation, preserve request order in this worker.

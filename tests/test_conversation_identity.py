@@ -61,8 +61,10 @@ def backend(db, log_path):
     env = dict(os.environ, CONVERSATION_DB_PATH=str(db))
     with log_path.open('w', encoding='utf-8') as log:
         process = subprocess.Popen([
-            sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1',
-            '--port', str(port), '--app-dir', str(ROOT / 'plugins/context_hygiene/backend'),
+            sys.executable, '-c',
+            "import sys; sys.modules['app.context_monitor'] = None; "
+            "import uvicorn; uvicorn.run('app.main:app', host='127.0.0.1', "
+            f"port={port}, app_dir={str(ROOT / 'plugins/context_hygiene/backend')!r})",
         ], cwd=ROOT, env=env, stdout=log, stderr=log)
         try:
             deadline = time.monotonic() + 15
@@ -122,6 +124,7 @@ def test_identity_vertical_slice_and_actual_process_restart(tmp_path):
         assert response.status_code == 200
         assert response.json()['conversation_id'] == 'canonical-A'
         assert response.json()['message_count'] == 2
+        assert response.json()['status'] == 'SAVED'
         assert get_messages('canonical-A', db) == expected['messages']
 
         with TestClient(atlas_app(db)) as atlas:

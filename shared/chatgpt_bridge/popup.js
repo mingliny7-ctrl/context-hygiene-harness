@@ -1,12 +1,5 @@
 "use strict";
 
-const reasonTranslations = {
-    "Conversation context is very large.": "对话上下文已经很大。",
-    "Conversation context is becoming large.": "对话上下文正在变长。",
-    "User has repeatedly corrected the assistant.": "你已经多次纠正 AI。",
-    "Conversation contains several deprecated decisions.": "对话中存在多个已经废弃的旧方案。",
-};
-
 const statusBadge = document.getElementById("statusBadge");
 const messageCount = document.getElementById("messageCount");
 const totalChars = document.getElementById("totalChars");
@@ -41,28 +34,18 @@ function waiting(text) {
 
 function render(health) {
     if (!health) return;
-    statusBadge.textContent = health.status;
-    statusBadge.className = `status ${health.status.toLowerCase()}`;
+    if (health.status !== "SAVED") {
+        waiting("旧风险评分已停用；正在读取采集状态...");
+        return;
+    }
+    statusBadge.textContent = "已保存";
+    statusBadge.className = "status";
     messageCount.textContent = health.message_count;
     totalChars.textContent = health.total_chars.toLocaleString();
     reasons.replaceChildren();
-    if (health.reasons.length === 0) {
-        reasons.textContent = "暂未检测到明显风险。";
-    } else {
-        for (const reason of health.reasons) {
-            const item = document.createElement("div");
-            item.className = "reason";
-            item.textContent = reasonTranslations[reason] || reason;
-            reasons.appendChild(item);
-        }
-    }
-    if (health.should_handoff) {
-        handoff.textContent = "建议切换到新的聊天窗口。";
-        handoff.className = "handoff visible";
-    } else {
-        handoff.textContent = "";
-        handoff.className = "handoff";
-    }
+    reasons.textContent = "已保存本次观察到的消息；不代表已采集完整对话。";
+    handoff.textContent = "";
+    handoff.className = "handoff";
 }
 
 async function refreshPopup() {

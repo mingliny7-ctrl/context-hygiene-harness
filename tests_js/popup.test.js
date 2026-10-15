@@ -56,31 +56,32 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
 
 test('popup restores current conversation from SQLite status even without local cache', async () => {
     const p = await makePopup(
-        '<https://chatgpt.com/g/example/c/B>',
+        'https://chatgpt.com/g/example/c/B',
         {'conversationHealth:A': {status:'RED',message_count:999,total_chars:9999,reasons:[],should_handoff:true}},
         async url => {
             assert.ok(url.endsWith('/conversations/B/status'));
             return {
                 ok: true,
                 async json() {return {
-                    conversation_id: 'B', status: 'YELLOW',
+                    conversation_id: 'B', status: 'SAVED',
                     message_count: 5, total_chars: 41,
-                    reasons: ['Conversation context is becoming large.'],
+                    reasons: [],
                     should_handoff: false,
                 };},
             };
         },
     );
-    assert.equal(p.nodes.statusBadge.textContent, 'YELLOW');
+    assert.equal(p.nodes.statusBadge.textContent, '已保存');
     assert.equal(p.nodes.messageCount.textContent, 5);
     assert.equal(p.nodes.totalChars.textContent, '41');
-    assert.equal(p.nodes.reasons.children[0].textContent, '对话上下文正在变长。');
+    assert.match(p.nodes.reasons.textContent, /不代表已采集完整对话/);
+    assert.equal(p.nodes.handoff.textContent, '');
     assert.equal(p.local['conversationHealth:B'].message_count, 5);
 });
 
 test('popup refuses to present a deleted DB conversation as current truth', async () => {
     const p = await makePopup(
-        '<https://chatgpt.com/c/A>',
+        'https://chatgpt.com/c/A',
         {'conversationHealth:A': {
             status:'RED', message_count:100,total_chars:50000,
             reasons:[],should_handoff:true,savedAt:1,
@@ -90,4 +91,13 @@ test('popup refuses to present a deleted DB conversation as current truth', asyn
     assert.equal(p.nodes.statusBadge.textContent, '--');
     assert.match(p.nodes.reasons.textContent, /数据库尚无/);
     assert.match(p.nodes.connectionNotice.textContent, /旧状态/);
+});
+
+test('popup never presents cached risk scores when collector is offline', async () => {
+    const p = await makePopup('https://chatgpt.com/c/A', {
+        'conversationHealth:A': {status:'RED',message_count:81,total_chars:9999,reasons:['risk'],should_handoff:true},
+    }, async () => {throw new Error('offline');});
+    assert.equal(p.nodes.statusBadge.textContent, '--');
+    assert.match(p.nodes.reasons.textContent, /风险评分已停用/);
+    assert.equal(p.nodes.handoff.textContent, '');
 });

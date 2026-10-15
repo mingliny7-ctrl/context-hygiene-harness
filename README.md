@@ -1,4 +1,10 @@
-Context Hygiene Harness
+# Context Harness
+
+2026-10-15 产品更新：上下文风险检测业务已停用。当前服务保留 ChatGPT 自动采集、Conversation SQLite 持久化及 Atlas 只读能力。`/sync` 和 `/conversations/{id}/status` 返回 `SAVED` 采集回执，不加载 Monitor；旧 `/analyze` 返回410。详情与验收记录见 [采集与风险检测解耦](docs/collection-risk-decoupling.md)。
+
+用户手动滚动页面，插件沿用现有自动监听。本轮未新增滚动采集逻辑。以下旧 MVP 内容作为历史设计记录保留，不代表当前风险业务仍启用。
+
+## 历史：Context Hygiene Harness
 一个面向 ChatGPT 长对话的上下文健康监测工具。
 项目通过浏览器扩展持续收集 ChatGPT 对话，将已观察到的消息持久化到本地 SQLite，并对当前 Conversation 的上下文规模、纠正行为与废弃方案等信号进行分析，输出：
 - GREEN

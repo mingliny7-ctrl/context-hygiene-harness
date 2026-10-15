@@ -160,5 +160,5 @@ test('extension manifest has required MV3 permissions and localhost host access'
     assert.equal(manifest.manifest_version, 3);
     assert.ok(manifest.permissions.includes('tabs'));
     assert.ok(manifest.permissions.includes('storage'));
-    assert.ok(manifest.host_permissions.includes('<http://127.0.0.1:8000/*>'));
+    assert.ok(manifest.host_permissions.includes('http://127.0.0.1:8000/*'));
 });

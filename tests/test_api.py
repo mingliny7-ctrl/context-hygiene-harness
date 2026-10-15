@@ -24,7 +24,9 @@ def test_sync_and_restore_status_from_db(tmp_path):
         assert first.status_code == 200, first.text
         assert first.json()["message_count"] == 2
         assert first.json()["total_chars"] == 10
-        assert first.json()["status"] == "GREEN"
+        assert first.json()["status"] == "SAVED"
+        assert first.json()["reasons"] == []
+        assert first.json()["should_handoff"] is False
 
         second = client.post(
             "/sync",
@@ -87,3 +89,22 @@ def test_rule_baseline_distinguishes_length_and_two_risks():
     ]
     deprecated = [Message(role="user", content="这个方案作废") for _ in range(3)]
     assert monitor.analyze(corrections + deprecated).status == "RED"
+
+
+def test_collection_never_initializes_or_calls_monitor(tmp_path, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Risk Monitor must not execute")
+    monkeypatch.setattr(ContextMonitor, "__init__", forbidden)
+    monkeypatch.setattr(ContextMonitor, "analyze", forbidden)
+    with TestClient(create_app(tmp_path / "no-monitor.db")) as client:
+        assert client.get('/health').status_code == 200
+        payload = {'conversation_id': 'collector-only', 'messages': [
+            {'key': 'u', 'role': 'user', 'content': '我说过了，这个方案作废'},
+        ]}
+        for _ in range(3):
+            response = client.post('/sync', json=payload)
+            assert response.status_code == 200
+            assert response.json()['status'] == 'SAVED'
+            assert response.json()['message_count'] == 1
+        assert client.get('/conversations/collector-only/status').json()['status'] == 'SAVED'
+        assert client.post('/analyze', json={'messages': []}).status_code == 410

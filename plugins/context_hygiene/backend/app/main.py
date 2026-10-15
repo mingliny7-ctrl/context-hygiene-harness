@@ -1,16 +1,13 @@
-"""Local-only Context Hygiene API. Shared Store is not owned by this plugin."""
+"""Local collection API; legacy Monitor implementation is retained but not loaded."""
 
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 
-from app.context_monitor import ContextMonitor
 from app.schemas import (
     AnalyzeRequest,
-    ContextHealth,
     ConversationSyncRequest,
     ConversationSyncResponse,
-    Message,
 )
 from shared.conversation_store.database import init_db
 from shared.conversation_store.identity import is_temporary_conversation_id
@@ -22,37 +19,27 @@ from shared.conversation_store.store import (
 
 
 def create_app(db_path: str | Path | None = None) -> FastAPI:
-    monitor = ContextMonitor()
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_db(db_path)
         yield
 
-    app = FastAPI(title="Context Hygiene MVP", lifespan=lifespan)
+    app = FastAPI(title="Context Harness Conversation Collector", lifespan=lifespan)
 
     @app.get("/health")
     def health():
         return {"status": "ok"}
 
-    @app.post("/analyze", response_model=ContextHealth)
+    @app.post("/analyze")
     def analyze(request: AnalyzeRequest):
-        # Kept to debug the original rule-only API; /sync is the browser entrypoint.
-        return monitor.analyze(request.messages)
+        raise HTTPException(status_code=410, detail="Context risk analysis has been retired")
 
-    def build_status(conversation_id: str) -> ConversationSyncResponse:
+    def build_receipt(conversation_id: str) -> ConversationSyncResponse:
         saved = get_messages(conversation_id, db_path)
-        monitor_input = [
-            Message(role=item["role"], content=item["content"]) for item in saved
-        ]
-        result = monitor.analyze(monitor_input)
         return ConversationSyncResponse(
             conversation_id=conversation_id,
-            status=result.status,
-            reasons=result.reasons,
-            should_handoff=result.should_handoff,
-            message_count=len(monitor_input),
-            total_chars=sum(len(m.content) for m in monitor_input),
+            message_count=len(saved),
+            total_chars=sum(len(m["content"]) for m in saved),
         )
 
     @app.post("/sync", response_model=ConversationSyncResponse)
@@ -69,7 +56,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             messages=[item.model_dump() for item in request.messages],
             db_path=db_path,
         )
-        return build_status(request.conversation_id)
+        return build_receipt(request.conversation_id)
 
     @app.get(
         "/conversations/{conversation_id}/status",
@@ -79,7 +66,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         # Lets Popup restore a conversation immediately, even before new DOM events.
         if not conversation_exists(conversation_id, db_path):
             raise HTTPException(status_code=404, detail="No stored conversation")
-        return build_status(conversation_id)
+        return build_receipt(conversation_id)
 
     return app
 

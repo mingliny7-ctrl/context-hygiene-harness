@@ -51,7 +51,7 @@ function fakeServer() {
     return async (_url, options) => {
         const body = JSON.parse(options.body);
         const count = body.messages.length;
-        const status = count >= 2 ? 'YELLOW' : 'GREEN';
+        const status = 'SAVED';
         return {
             ok: true,
             async json() {
@@ -73,19 +73,21 @@ test('worker saves distinct per-conversation statuses and badges per tab', async
     const msg = {key: 'k1', role: 'user', content: 'hello'};
     assert.equal((await w.emit('A', 17, [msg])).ok, true);
     assert.equal((await w.emit('B', 27, [msg, {...msg, key: 'k2'}])).ok, true);
-    assert.equal(w.local['conversationHealth:A'].status, 'GREEN');
-    assert.equal(w.local['conversationHealth:B'].status, 'YELLOW');
-    assert.equal(w.badges[17].text, 'G');
-    assert.equal(w.badges[27].text, 'Y');
+    assert.equal(w.local['conversationHealth:A'].status, 'SAVED');
+    assert.equal(w.local['conversationHealth:B'].status, 'SAVED');
+    assert.equal(w.local['conversationHealth:A'].message_count, 1);
+    assert.equal(w.local['conversationHealth:B'].message_count, 2);
+    assert.equal(w.badges[17].text, 'S');
+    assert.equal(w.badges[27].text, 'S');
     assert.equal(w.session['tabConversation:17'], 'A');
     assert.equal(w.session['tabConversation:27'], 'B');
 
     // Two tabs viewing the SAME chat should both update, but B remains separate.
     await w.emit('A', 37, [msg]);
     await w.emit('A', 17, [msg, {...msg, key: 'k2'}]);
-    assert.equal(w.badges[17].text, 'Y');
-    assert.equal(w.badges[37].text, 'Y');
-    assert.equal(w.badges[27].text, 'Y');
+    assert.equal(w.badges[17].text, 'S');
+    assert.equal(w.badges[37].text, 'S');
+    assert.equal(w.badges[27].text, 'S');
 });
 
 test('older in-flight response cannot paint the badge of a switched tab', async () => {
@@ -93,14 +95,14 @@ test('older in-flight response cannot paint the badge of a switched tab', async 
     const waitA = new Promise(resolve => { releaseA = resolve; });
     const w = makeWorker(async (_url, options) => {
         const id = JSON.parse(options.body).conversation_id;
-        if (id === 'A') await waitA;
+        if (id === 'A') { await waitA; throw new Error('old request failed'); }
         return {
             ok: true,
             async json() {
                 return {
                     conversation_id: id,
-                    status: id === 'A' ? 'RED' : 'GREEN',
-                    reasons: [], should_handoff: id === 'A',
+                    status: 'SAVED',
+                    reasons: [], should_handoff: false,
                     message_count: 1, total_chars: 1,
                 };
             },
@@ -112,7 +114,7 @@ test('older in-flight response cannot paint the badge of a switched tab', async 
     const fresh = w.emit('B', 17, [{key: 'k', role: 'user', content: 'new'}]);
     assert.equal((await fresh).ok, true);
     releaseA();
-    assert.equal((await old).ok, true);
+    assert.equal((await old).ok, false);
     assert.equal(w.session['tabConversation:17'], 'B');
-    assert.equal(w.badges[17].text, 'G');
+    assert.equal(w.badges[17].text, 'S');
 });

@@ -26,7 +26,11 @@ class ConversationSyncRequest(BaseModel):
     messages: list[BridgeMessage]
 
 
-class ConversationSyncResponse(ContextHealth):
+class ConversationSyncResponse(BaseModel):
     conversation_id: str
     message_count: int
     total_chars: int
+    status: Literal["SAVED"] = "SAVED"
+    # Legacy wire fields remain inert for already-installed extension clients.
+    reasons: list[str] = Field(default_factory=list)
+    should_handoff: Literal[False] = False
