@@ -55,6 +55,18 @@ def init_db(db_path: str | Path | None = None) -> None:
                     ON DELETE CASCADE
             )
             """)
+        # Additive migration: no backfill, original messages remain untouched.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS collector_save_state (
+                conversation_id TEXT PRIMARY KEY,
+                message_key TEXT NOT NULL,
+                preview TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                saved_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id, message_key)
+                    REFERENCES messages(conversation_id, message_key) ON DELETE CASCADE
+            )
+        """)
         connection.commit()
     finally:
         connection.close()

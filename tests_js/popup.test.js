@@ -60,6 +60,7 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
     vm.runInNewContext(source, context);
     await new Promise(resolve => setImmediate(resolve));
     return {nodes, local,
+        async pollNow(){poll();await new Promise(resolve=>setImmediate(resolve));},
         navigateNow(url){activeUrl=url;onUpdated(17,{url});},
         activateNow(url){activeUrl=url;onActivated({tabId:18});},
         async navigate(url){activeUrl=url;onUpdated(17,{url});await new Promise(resolve=>setImmediate(resolve));}};
@@ -86,7 +87,7 @@ test('popup restores current conversation from SQLite status even without local 
     assert.equal(p.nodes.statusBadge.textContent, '已保存');
     assert.equal(p.nodes.messageCount.textContent, 3);
     assert.match(p.nodes.reasons.textContent, /不代表对话已采集完整/);
-    assert.equal(p.nodes.latestAnswer.textContent, '对话顺序未确认，暂无法判断最近回答');
+    assert.equal(p.nodes.latestAnswer.textContent, '历史保存事件未记录，等待新保存');
     assert.equal(p.local['conversationHealth:B'],undefined,'GET must not create a write acknowledgement');
 });
 
@@ -117,10 +118,10 @@ test('popup follows SPA title, shows only confirmed native Assistant count and n
     const p=await makePopup('https://chatgpt.com/c/A',{
         'conversationHealth:A':{conversation_id:'A',status:'SAVED',title:'真正的A标题',capture_state:'SAVED',assistant_reply_count:1,count_status:'verified'},
         'conversationHealth:B':{conversation_id:'B',status:'SAVED',title:'真正的B标题',capture_state:'SAVED'},
-    },async url=>({ok:true,status:200,async json(){const id=url.includes('/A/')?'A':'B';return{conversation_id:id,status:'SAVED',assistant_reply_count:id==='A'?1:null,count_status:id==='A'?'verified':'legacy_identity_unverified'};}}));
+    },async url=>({ok:true,status:200,async json(){const id=url.includes('/A/')?'A':'B';return{conversation_id:id,status:'SAVED',assistant_reply_count:id==='A'?1:null,confirmed_assistant_reply_count:3,count_status:id==='A'?'verified':'legacy_identity_unverified'};}}));
     assert.equal(p.nodes.conversationTitle.textContent,'真正的A标题');assert.equal(p.nodes.messageCount.textContent,1);
     await p.navigate('https://chatgpt.com/c/B');
-    assert.equal(p.nodes.conversationTitle.textContent,'真正的B标题');assert.equal(p.nodes.messageCount.textContent,'暂不可用');
+    assert.equal(p.nodes.conversationTitle.textContent,'真正的B标题');assert.equal(p.nodes.messageCount.textContent,'至少 3 条');
     assert.equal(p.nodes.statusBadge.textContent,'已保存');
     const html=fs.readFileSync(path.join(__dirname,'../shared/chatgpt_bridge/popup.html'),'utf8');
     assert.doesNotMatch(html,/totalChars|Characters/);assert.doesNotMatch(source,/totalChars|total_chars/);
@@ -137,7 +138,7 @@ test('preview uses database receipt only, clears synchronously and rejects stale
     let finishB;
     const receipt = (id, text) => ({ok:true,status:200,async json(){return {
         conversation_id:id,status:'SAVED',assistant_reply_count:1,count_status:'verified',
-        latest_assistant_status:'single_verified_answer',latest_assistant_preview:text,
+        latest_assistant_status:'saved_event',latest_assistant_preview:text,
     };}});
     const p = await makePopup('https://chatgpt.com/c/A',{
         'conversationHealth:A':{status:'SAVED',latest_assistant_preview:'未经数据库确认的缓存'},
@@ -157,15 +158,15 @@ test('preview uses database receipt only, clears synchronously and rejects stale
     assert.equal(p.nodes.latestAnswer.textContent,'数据库C');
 });
 
-test('preview fails closed on wrong identity, unknown order and empty saved answers',async()=>{
+test('preview fails closed on wrong identity, untracked history and empty saved answers',async()=>{
     const p = await makePopup('https://chatgpt.com/c/A',{},async url=>({ok:true,status:200,async json(){
         const id=url.includes('/A/')?'A':url.includes('/B/')?'B':'wrong';
         return {conversation_id:id,status:'SAVED',count_status:'verified',assistant_reply_count:0,
-            latest_assistant_status:id==='A'?'empty':'order_unverified',latest_assistant_preview:'不能显示的内容'};
+            latest_assistant_status:id==='A'?'empty':'history_untracked',latest_assistant_preview:'不能显示的内容'};
     }}));
     assert.equal(p.nodes.latestAnswer.textContent,'暂无已保存的模型回答');
     await p.navigate('https://chatgpt.com/c/B');
-    assert.equal(p.nodes.latestAnswer.textContent,'对话顺序未确认，暂无法判断最近回答');
+    assert.equal(p.nodes.latestAnswer.textContent,'历史保存事件未记录，等待新保存');
     await p.navigate('https://chatgpt.com/c/C');
     assert.equal(p.nodes.latestAnswer.textContent,'无法确认已保存回答');
     assert.equal(p.nodes.statusBadge.textContent,'保存失败');
@@ -175,4 +176,30 @@ test('preview fails closed on wrong identity, unknown order and empty saved answ
     assert.doesNotMatch(html,/<a\b|<button\b|id="handoff"/i);
     assert.match(source,/latestAnswer\.textContent/);
     assert.doesNotMatch(source,/innerHTML/);
+});
+
+test('A B A C keeps saved counts and events isolated and polling does not blank confirmed progress',async()=>{
+    let paused=false, finish;
+    const p=await makePopup('https://chatgpt.com/c/A',{},async url=>{
+        if(paused) await new Promise(resolve=>{finish=resolve;});
+        const id=url.match(/conversations\/([^/]+)/)[1];
+        return {ok:true,status:200,async json(){return {
+            conversation_id:id,status:'SAVED',count_status:'verified',
+            assistant_reply_count:{A:3,B:4,C:0}[id],
+            latest_assistant_status:id==='C'?'empty':'saved_event',
+            latest_assistant_preview:`${id}刚保存的回答`,
+        };}};
+    });
+    assert.equal(p.nodes.messageCount.textContent,3);
+    await p.navigate('https://chatgpt.com/c/B');
+    assert.equal(p.nodes.messageCount.textContent,4);
+    assert.equal(p.nodes.latestAnswer.textContent,'B刚保存的回答');
+    await p.navigate('https://chatgpt.com/c/A');
+    paused=true;await p.pollNow();
+    assert.equal(p.nodes.messageCount.textContent,3);
+    assert.equal(p.nodes.latestAnswer.textContent,'A刚保存的回答');
+    paused=false;finish();await new Promise(resolve=>setImmediate(resolve));
+    await p.navigate('https://chatgpt.com/c/C');
+    assert.equal(p.nodes.messageCount.textContent,0);
+    assert.equal(p.nodes.latestAnswer.textContent,'暂无已保存的模型回答');
 });

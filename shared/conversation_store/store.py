@@ -32,17 +32,25 @@ def ensure_conversation(connection, conversation_id: str) -> None:
     )
 
 
-def saved_assistant_preview(messages: list[dict]) -> tuple[str | None, str]:
-    """No source chronology is stored. Only a singleton needs no ordering inference."""
-    count, reliability, _ = saved_assistant_count(messages)
-    if count == 0:
-        return None, 'empty'
-    if reliability != 'verified' or count != 1:
-        return None, 'order_unverified'
-    answer = next(m['content'] for m in messages
-                  if m['role'] == 'assistant' and m['content'].strip())
-    text = ' '.join(answer.split())
-    return text[:40] + ('…' if len(text) > 40 else ''), 'single_verified_answer'
+def get_collection_snapshot(conversation_id: str, db_path=None) -> tuple[list[dict], dict | None]:
+    """Read count inputs and the committed save event from the same snapshot."""
+    connection = get_read_connection(db_path)
+    try:
+        connection.execute('BEGIN')
+        messages = connection.execute(
+            'SELECT message_key AS key, role, content FROM messages WHERE conversation_id=?',
+            (conversation_id,),
+        ).fetchall()
+        event = connection.execute(
+            'SELECT message_key, preview, revision FROM collector_save_state WHERE conversation_id=?',
+            (conversation_id,),
+        ).fetchone()
+        valid_event = event and any(row['key'] == event['message_key'] and
+                                    row['role'] == 'assistant' and row['content'].strip()
+                                    for row in messages)
+        return [dict(row) for row in messages], dict(event) if valid_event else None
+    finally:
+        connection.close()
 
 
 def save_message(
@@ -52,7 +60,7 @@ def save_message(
     role: str,
     content: str,
 ) -> None:
-    connection.execute(
+    changed = connection.execute(
         """
         INSERT INTO messages (conversation_id, message_key, role, content)
         VALUES (?, ?, ?, ?)
@@ -64,6 +72,19 @@ def save_message(
         """,
         (conversation_id, message_key, role, content),
     )
+    # rowcount is zero for a duplicate/shorter observation: not a save event.
+    # The event rolls back with the original write if any later message fails.
+    if changed.rowcount and role == 'assistant' and content.strip():
+        text = ' '.join(content.split())
+        preview = text[:16] + ('…' if len(text) > 16 else '')
+        connection.execute("""
+            INSERT INTO collector_save_state
+                (conversation_id, message_key, preview, revision, saved_at)
+            VALUES (?, ?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ON CONFLICT(conversation_id) DO UPDATE SET
+                message_key=excluded.message_key, preview=excluded.preview,
+                revision=collector_save_state.revision+1, saved_at=excluded.saved_at
+        """, (conversation_id, message_key, preview))
 
 
 def save_observation(

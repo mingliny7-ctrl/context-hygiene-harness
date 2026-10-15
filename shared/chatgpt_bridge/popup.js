@@ -41,8 +41,10 @@ function render(health, fromDatabase = false) {
     const state = health.capture_state || 'SAVED';
     statusBadge.textContent = {SAVED:'已保存',CAPTURING:'正在采集',DISCONNECTED:'未连接',FAILED:'保存失败'}[state] || '正在采集';
     statusBadge.className = "status";
-    messageCount.textContent = !['DISCONNECTED','FAILED'].includes(state) && health.count_status === 'verified' && Number.isInteger(health.assistant_reply_count)
-        ? health.assistant_reply_count : '暂不可用';
+    messageCount.textContent = !fromDatabase ? '正在确认…'
+        : Number.isInteger(health.assistant_reply_count) ? health.assistant_reply_count
+        : Number.isInteger(health.confirmed_assistant_reply_count)
+            ? `至少 ${health.confirmed_assistant_reply_count} 条` : '暂不可用';
     if (health.title) conversationTitle.textContent = health.title;
     reasons.replaceChildren();
     reasons.textContent = health.count_status === 'legacy_identity_unverified'
@@ -52,9 +54,9 @@ function render(health, fromDatabase = false) {
     if (health.needsRefresh) reasons.textContent = '此页面仍在运行旧Reader，请刷新这个ChatGPT页面后继续采集。';
     latestAnswer.textContent = !fromDatabase ? '正在确认已保存回答…'
         : health.latest_assistant_status === 'empty' ? '暂无已保存的模型回答'
-        : health.latest_assistant_status === 'single_verified_answer' && typeof health.latest_assistant_preview === 'string'
+        : health.latest_assistant_status === 'saved_event' && typeof health.latest_assistant_preview === 'string'
             ? health.latest_assistant_preview
-            : '对话顺序未确认，暂无法判断最近回答';
+            : '历史保存事件未记录，等待新保存';
 }
 
 function clearConversation() {
@@ -89,8 +91,8 @@ async function refreshPopup() {
     const key = healthKey(id);
     const saved = await chrome.storage.local.get(key);
     if (requestSerial !== serial) return;
-    if (saved[key]) render({...saved[key],capture_state:'CAPTURING'});
-    else waiting("正在恢复该聊天的历史状态...");
+    // Polling must not blank an already DB-confirmed result every 1.5 seconds.
+    if (saved[key]?.title) conversationTitle.textContent = saved[key].title;
 
     // SQLite is authoritative; GET restores even after extension restarts.
     try {
@@ -131,7 +133,7 @@ async function refreshPopup() {
         if (requestSerial !== serial || currentConversationId !== id) return;
         waiting('无法确认当前保存结果，请检查本地采集服务。', _error.httpStatus ? 'FAILED' : 'DISCONNECTED');
         connectionNotice.textContent = saved[key]
-            ? "本地后端未连接：目前显示的是上次结果。"
+            ? "无法确认当前数据库状态，请检查本地采集服务。"
             : "无法连接本地后端：请启动 FastAPI 并刷新聊天页面。";
     }
 }
