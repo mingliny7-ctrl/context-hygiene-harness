@@ -2,7 +2,7 @@
 
 const statusBadge = document.getElementById("statusBadge");
 const messageCount = document.getElementById("messageCount");
-const totalChars = document.getElementById("totalChars");
+const conversationTitle = document.getElementById("conversationTitle");
 const reasons = document.getElementById("reasons");
 const handoff = document.getElementById("handoff");
 const connectionNotice = document.getElementById("connectionNotice");
@@ -22,11 +22,10 @@ function conversationIdFromUrl(url) {
     }
 }
 
-function waiting(text) {
-    statusBadge.textContent = "--";
+function waiting(text, state='CAPTURING') {
+    statusBadge.textContent = {CAPTURING:'正在采集',DISCONNECTED:'未连接',FAILED:'保存失败'}[state] || '正在采集';
     statusBadge.className = "status";
-    messageCount.textContent = "-";
-    totalChars.textContent = "-";
+    messageCount.textContent = "暂不可用";
     reasons.textContent = text;
     handoff.textContent = "";
     handoff.className = "handoff";
@@ -38,12 +37,18 @@ function render(health) {
         waiting("旧风险评分已停用；正在读取采集状态...");
         return;
     }
-    statusBadge.textContent = "已保存";
+    const state = health.capture_state || 'SAVED';
+    statusBadge.textContent = {SAVED:'已保存',CAPTURING:'正在采集',DISCONNECTED:'未连接',FAILED:'保存失败'}[state] || '正在采集';
     statusBadge.className = "status";
-    messageCount.textContent = health.message_count;
-    totalChars.textContent = health.total_chars.toLocaleString();
+    messageCount.textContent = !['DISCONNECTED','FAILED'].includes(state) && health.count_status === 'verified' && Number.isInteger(health.assistant_reply_count)
+        ? health.assistant_reply_count : '暂不可用';
+    if (health.title) conversationTitle.textContent = health.title;
     reasons.replaceChildren();
-    reasons.textContent = "已保存本次观察到的消息；不代表已采集完整对话。";
+    reasons.textContent = health.count_status === 'legacy_identity_unverified'
+        ? `已确认保存 ${health.confirmed_assistant_reply_count ?? 0} 条原始ID模型回复；旧消息身份未归一，总数暂不可用。`
+        : '仅统计数据库已保存的有效模型回复，不代表对话已采集完整。';
+    if (health.unresolvedMessages) reasons.textContent += ' 部分消息身份尚未确认，正在等待页面提供来源。';
+    if (health.needsRefresh) reasons.textContent = '此页面仍在运行旧Reader，请刷新这个ChatGPT页面后继续采集。';
     handoff.textContent = "";
     handoff.className = "handoff";
 }
@@ -52,6 +57,7 @@ async function refreshPopup() {
     const serial = ++requestSerial;
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const id = conversationIdFromUrl(tabs[0]?.url);
+    if (id !== currentConversationId) conversationTitle.textContent = '正在获取对话名称';
     currentConversationId = id;
     connectionNotice.textContent = "";
     if (!id) {
@@ -62,7 +68,7 @@ async function refreshPopup() {
     const key = healthKey(id);
     const saved = await chrome.storage.local.get(key);
     if (requestSerial !== serial) return;
-    if (saved[key]) render(saved[key]);
+    if (saved[key]) render({...saved[key],capture_state:'CAPTURING'});
     else waiting("正在恢复该聊天的历史状态...");
 
     // SQLite is authoritative; GET restores even after extension restarts.
@@ -78,7 +84,11 @@ async function refreshPopup() {
             }
             return;
         }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}`);
+            error.httpStatus = response.status;
+            throw error;
+        }
         const health = await response.json();
         if (requestSerial !== serial || currentConversationId !== id) return;
         // If Worker posted a newer result while GET was in flight, don't
@@ -89,10 +99,15 @@ async function refreshPopup() {
             render(newest[key]);
             return;
         }
-        render(health);
-        await chrome.storage.local.set({ [key]: { ...health, savedAt: Date.now() } });
+        const metadata = newest[key] || saved[key] || {};
+        const state = metadata.capture_state === 'FAILED' ? 'FAILED'
+            : metadata.pendingAssistants || metadata.unresolvedMessages || ['CAPTURING','DISCONNECTED'].includes(metadata.capture_state) ? 'CAPTURING' : 'SAVED';
+        render({...metadata, ...health, capture_state:state});
+        // Worker owns the write acknowledgement. GET cannot turn an older
+        // receipt into a newer save or overwrite an in-flight operation.
     } catch (_error) {
         if (requestSerial !== serial || currentConversationId !== id) return;
+        waiting('无法确认当前保存结果，请检查本地采集服务。', _error.httpStatus ? 'FAILED' : 'DISCONNECTED');
         connectionNotice.textContent = saved[key]
             ? "本地后端未连接：目前显示的是上次结果。"
             : "无法连接本地后端：请启动 FastAPI 并刷新聊天页面。";
@@ -111,5 +126,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 refreshPopup().catch(error => {
     console.error("Popup failed:", error);
-    waiting("读取状态失败，请刷新聊天页面。");
+    waiting("读取状态失败，请刷新聊天页面。",'FAILED');
 });
+
+if (typeof setInterval === 'function') setInterval(() => {
+    refreshPopup().catch(() => waiting('无法连接采集服务。','DISCONNECTED'));
+}, 1500);

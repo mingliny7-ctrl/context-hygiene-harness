@@ -16,9 +16,18 @@ function makeReader(initialRoute, nodes) {
     let observerCallback;
     let routeCallback;
     const page = {
-        location: { pathname: initialRoute },
+        location: { pathname: initialRoute, origin:'https://chatgpt.com', get href(){return this.origin+this.pathname;} },
         nodes,
     };
+    const roots = new Map();
+    function elements() {
+        return page.nodes.map(({key, content}) => {
+            let n=0;for(const char of key)n=(n*31+char.charCodeAt(0))>>>0;
+            const id=`00000000-0000-4000-8000-${n.toString(16).padStart(12,'0')}`;
+            return {getAttribute(name){return name==='data-content-search-unit-key'?key:null;},innerText:content,
+                closest(selector){return {getAttribute(name){return name==='data-chatgpt-search-message-ids'?id:name==='data-talvt-turn-state'?'complete':null;}};}};
+        });
+    }
     const chrome = {
         runtime: {
             id: 'test-extension',
@@ -31,13 +40,17 @@ function makeReader(initialRoute, nodes) {
     const context = {
         console: {log() {}, warn() {}},
         location: page.location,
+        URL,
         document: {
             body: {},
-            querySelectorAll() {
-                return page.nodes.map(({key, content}) => ({
-                    getAttribute() { return key; },
-                    innerText: content,
-                }));
+            documentElement: {},
+            querySelectorAll(selector) {
+                if(selector==='a[href]')return [];
+                if(selector==='[data-app-shell-active-page="true"]'){
+                    if(!roots.has(page.location.pathname))roots.set(page.location.pathname,{querySelectorAll:elements});
+                    return [roots.get(page.location.pathname)];
+                }
+                return elements();
             },
         },
         chrome,

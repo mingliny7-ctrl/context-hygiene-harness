@@ -23,7 +23,9 @@ def test_sync_and_restore_status_from_db(tmp_path):
         )
         assert first.status_code == 200, first.text
         assert first.json()["message_count"] == 2
-        assert first.json()["total_chars"] == 10
+        assert first.json()["assistant_reply_count"] is None
+        assert first.json()["count_status"] == 'legacy_identity_unverified'
+        assert 'total_chars' not in first.json()
         assert first.json()["status"] == "SAVED"
         assert first.json()["reasons"] == []
         assert first.json()["should_handoff"] is False
@@ -39,7 +41,7 @@ def test_sync_and_restore_status_from_db(tmp_path):
             },
         )
         assert second.json()["message_count"] == 3
-        assert second.json()["total_chars"] == len("hellohello-worldnext")
+        assert second.json()["assistant_reply_count"] is None
 
         short = client.post(
             "/sync",
@@ -48,14 +50,14 @@ def test_sync_and_restore_status_from_db(tmp_path):
                 "messages": [{"key": "a1", "role": "assistant", "content": "x"}],
             },
         )
-        assert short.json()["total_chars"] == second.json()["total_chars"]
+        assert short.json()["message_count"] == second.json()["message_count"]
 
     # Recreating app represents a fresh backend process using same database.
     with TestClient(create_app(db)) as restarted:
         restored = restarted.get("/conversations/A/status")
         assert restored.status_code == 200
         assert restored.json()["message_count"] == 3
-        assert restored.json()["total_chars"] == len("hellohello-worldnext")
+        assert restored.json()["assistant_reply_count"] is None
 
 
 def test_validation_and_conversation_isolation(tmp_path):

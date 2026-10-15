@@ -15,6 +15,7 @@ from shared.conversation_store.store import (
     conversation_exists,
     get_messages,
     save_observation,
+    saved_assistant_count,
 )
 
 
@@ -36,10 +37,13 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
 
     def build_receipt(conversation_id: str) -> ConversationSyncResponse:
         saved = get_messages(conversation_id, db_path)
+        assistant_count, count_status, confirmed_count = saved_assistant_count(saved)
         return ConversationSyncResponse(
             conversation_id=conversation_id,
             message_count=len(saved),
-            total_chars=sum(len(m["content"]) for m in saved),
+            assistant_reply_count=assistant_count,
+            count_status=count_status,
+            confirmed_assistant_reply_count=confirmed_count,
         )
 
     @app.post("/sync", response_model=ConversationSyncResponse)

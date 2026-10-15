@@ -32,14 +32,14 @@ function makeWorker(fetchMock) {
             },
         },
     };
-    vm.runInNewContext(source, {chrome, fetch: fetchMock, console: {log() {}, warn() {}}});
+    vm.runInNewContext(source, {chrome, fetch: fetchMock, URL, console: {log() {}, warn() {}}});
     return {
         local, session, badges,
-        emit(conversationId, tabId, messages) {
+        emit(conversationId, tabId, messages, extra={}, tabUrl) {
             return new Promise(resolve => {
                 const result = listener(
-                    {type: 'CONVERSATION_UPDATED', conversationId, messages},
-                    {tab: {id: tabId}}, resolve
+                    {type: 'CONVERSATION_UPDATED', conversationId, messages,readerVersion:'2.0.0',...extra},
+                    {tab: {id: tabId,url:tabUrl}}, resolve
                 );
                 assert.equal(result, true);
             });
@@ -88,6 +88,27 @@ test('worker saves distinct per-conversation statuses and badges per tab', async
     assert.equal(w.badges[17].text, 'S');
     assert.equal(w.badges[37].text, 'S');
     assert.equal(w.badges[27].text, 'S');
+});
+
+test('worker rejects stale navigation before HTTP and waits for HTTP ack before SAVED',async()=>{
+    let release;const wait=new Promise(resolve=>release=resolve);let calls=0;
+    const w=makeWorker(async(url,options)=>{calls++;await wait;return fakeServer()(url,options);});
+    const stale=await w.emit('A',17,[],{sourceUrl:'https://chatgpt.com/c/A'},'https://chatgpt.com/c/B');
+    assert.equal(stale.ok,false);assert.equal(calls,0);
+    const pending=w.emit('B',17,[],{title:'B real',sourceUrl:'https://chatgpt.com/c/B'},'https://chatgpt.com/c/B');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(w.local['conversationHealth:B'].capture_state,'CAPTURING');
+    assert.notEqual(w.local['conversationHealth:B'].status,'SAVED');
+    release();const reply=await pending;assert.equal(reply.conversationId,'B');
+    assert.equal(w.local['conversationHealth:B'].capture_state,'SAVED');assert.equal(w.local['conversationHealth:B'].title,'B real');
+});
+
+test('worker refuses old Reader payloads rather than saving cross-page fallback records',async()=>{
+    let calls=0;const w=makeWorker(async()=>{calls++;throw new Error('must not fetch');});
+    const reply=await w.emit('A',17,[],{readerVersion:'legacy'});
+    assert.equal(reply.ok,false);assert.equal(calls,0);
+    assert.equal(w.local['conversationHealth:A'].needsRefresh,true);
+    assert.equal(w.local['conversationHealth:A'].capture_state,'FAILED');
 });
 
 test('older in-flight response cannot paint the badge of a switched tab', async () => {

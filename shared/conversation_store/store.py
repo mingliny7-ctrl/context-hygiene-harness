@@ -1,9 +1,23 @@
 """Conversation-level operations; browser/UI and monitoring do not write SQL."""
 
 from pathlib import Path
+import re
 from shared.conversation_store.database import get_connection
 from shared.conversation_store.database import get_read_connection
 from shared.conversation_store.identity import is_temporary_conversation_id
+
+
+def saved_assistant_count(messages: list[dict]) -> tuple[int | None, str, int]:
+    """Only native-identity rows can prove unique saved answers.
+
+    Old positional keys may contain duplicates; never clean or infer their aliases.
+    """
+    answers = [m for m in messages if m['role'] == 'assistant' and m['content'].strip()]
+    native = re.compile(r'^chatgpt:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:assistant$')
+    confirmed = sum(bool(native.fullmatch(m['key'])) for m in answers)
+    if confirmed != len(answers):
+        return None, 'legacy_identity_unverified', confirmed
+    return len(answers), 'verified', confirmed
 
 
 def ensure_conversation(connection, conversation_id: str) -> None:

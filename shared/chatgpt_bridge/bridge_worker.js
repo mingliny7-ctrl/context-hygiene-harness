@@ -5,6 +5,9 @@ console.log("[ChatGPT Bridge] Worker started.");
 // Chrome can suspend service workers. All durable chat data is in SQLite.
 // This Map serializes in-flight requests during the current worker lifetime.
 const syncQueues = new Map();
+const latestCapture = new Map();
+const latestTabUpdate = new Map();
+let updateSerial = 0;
 
 const tabKey = tabId => `tabConversation:${tabId}`;
 const healthKey = conversationId => `conversationHealth:${conversationId}`;
@@ -34,7 +37,7 @@ async function badgeAllTabsForConversation(conversationId, status) {
     }
 }
 
-async function syncOnce(conversationId, messages) {
+async function syncOnce(conversationId, messages, metadata, serial) {
     const response = await fetch("http://127.0.0.1:8000/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -43,12 +46,25 @@ async function syncOnce(conversationId, messages) {
             messages,
         }),
     });
-    if (!response.ok) throw new Error(`/sync returned HTTP ${response.status}`);
+    if (!response.ok) {
+        const error = new Error(`/sync returned HTTP ${response.status}`);
+        error.httpStatus = response.status;
+        throw error;
+    }
     const health = await response.json();
-    await chrome.storage.local.set({
-        [healthKey(conversationId)]: { ...health, savedAt: Date.now() },
-    });
-    await badgeAllTabsForConversation(conversationId, health.status);
+    if (health.conversation_id !== conversationId || health.status !== 'SAVED') {
+        const error = new Error('Invalid collection acknowledgement');
+        error.httpStatus = 502;
+        throw error;
+    }
+    if (latestCapture.get(conversationId) === serial) {
+        await chrome.storage.local.set({
+            [healthKey(conversationId)]: { ...health, ...metadata,
+                capture_state: metadata.pendingAssistants || metadata.unresolvedMessages ? 'CAPTURING' : 'SAVED',
+                savedAt: Date.now() },
+        });
+        await badgeAllTabsForConversation(conversationId, metadata.pendingAssistants || metadata.unresolvedMessages ? 'PENDING' : 'SAVED');
+    }
     console.log("[Context Hygiene] Synchronized:",
                 conversationId, health.message_count, health.status);
     return health;
@@ -63,18 +79,58 @@ async function handleUpdate(message, sender) {
     }
 
     const conversationId = message.conversationId;
+    const idFromUrl = url => {
+        try { return new URL(url).pathname.match(/\/c\/([^/]+)/)?.[1]; }
+        catch (_error) { return null; }
+    };
+    if ((message.sourceUrl && idFromUrl(message.sourceUrl) !== conversationId) ||
+        (sender.tab.url && idFromUrl(sender.tab.url) !== conversationId)) {
+        throw new Error('Stale Reader navigation');
+    }
+    const serial = ++updateSerial;
+    latestCapture.set(conversationId, serial);
+    latestTabUpdate.set(tabId, serial);
+    if (message.readerVersion !== '2.0.0') {
+        const prior = await chrome.storage.local.get(healthKey(conversationId));
+        if (latestCapture.get(conversationId) === serial) {
+            await chrome.storage.local.set({[healthKey(conversationId)]: {
+                ...prior[healthKey(conversationId)], conversation_id:conversationId,
+                capture_state:'FAILED', needsRefresh:true,
+            }});
+        }
+        throw new Error('STALE_READER: refresh this ChatGPT page');
+    }
+    const metadata = {
+        title: typeof message.title === 'string' ? message.title.slice(0,512) : '',
+        pendingAssistants: message.pendingAssistants || 0,
+        unresolvedMessages: message.unresolvedMessages || 0,
+        readerVersion: message.readerVersion || 'legacy',
+        needsRefresh:false,
+        observedKeys: message.messages.map(m => m.key),
+    };
     const oldMapping = await chrome.storage.session.get(tabKey(tabId));
-    await chrome.storage.session.set({ [tabKey(tabId)]: conversationId });
-    if (oldMapping[tabKey(tabId)] !== conversationId) {
+    if (latestTabUpdate.get(tabId) === serial) {
+        await chrome.storage.session.set({ [tabKey(tabId)]: conversationId });
+    }
+    if (latestTabUpdate.get(tabId) === serial && oldMapping[tabKey(tabId)] !== conversationId) {
         // Don't leave conversation A's badge on a tab that switched to B.
         const cached = await chrome.storage.local.get(healthKey(conversationId));
         await setBadge(tabId, cached[healthKey(conversationId)]?.status === "SAVED" ? "SAVED" : "PENDING");
+    }
+    if (latestCapture.get(conversationId) === serial) {
+        const prior = await chrome.storage.local.get(healthKey(conversationId));
+        if (latestCapture.get(conversationId) === serial) {
+            await chrome.storage.local.set({[healthKey(conversationId)]: {
+                ...prior[healthKey(conversationId)], ...metadata,
+                conversation_id: conversationId, capture_state:'CAPTURING', startedAt:Date.now(),
+            }});
+        }
     }
 
     // For the SAME conversation, preserve request order in this worker.
     const previous = syncQueues.get(conversationId) || Promise.resolve();
     const current = previous.catch(() => {}).then(
-        () => syncOnce(conversationId, message.messages)
+        () => syncOnce(conversationId, message.messages, metadata, serial)
     );
     syncQueues.set(conversationId, current);
 
@@ -83,7 +139,14 @@ async function handleUpdate(message, sender) {
     } catch (error) {
         // Only current tabs of the failed conversation show an error badge.
         console.warn("[Context Hygiene] Sync failed:", String(error));
-        await badgeAllTabsForConversation(conversationId, "ERROR");
+        if (latestCapture.get(conversationId) === serial) {
+            const prior = await chrome.storage.local.get(healthKey(conversationId));
+            await chrome.storage.local.set({[healthKey(conversationId)]: {
+                ...prior[healthKey(conversationId)], ...metadata, conversation_id:conversationId,
+                capture_state: error.httpStatus ? 'FAILED' : 'DISCONNECTED', error:String(error),
+            }});
+            await badgeAllTabsForConversation(conversationId, "ERROR");
+        }
         throw error;
     } finally {
         if (syncQueues.get(conversationId) === current) {
@@ -95,7 +158,7 @@ async function handleUpdate(message, sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type !== "CONVERSATION_UPDATED") return false;
     handleUpdate(message, sender).then(
-        () => sendResponse({ ok: true }),
+        receipt => sendResponse({ ok: true, conversationId:message.conversationId, receipt }),
         error => sendResponse({ ok: false, error: String(error) }),
     );
     // Keep this message channel alive until async /sync finishes.

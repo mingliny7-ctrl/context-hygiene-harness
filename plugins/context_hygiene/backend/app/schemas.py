@@ -29,7 +29,9 @@ class ConversationSyncRequest(BaseModel):
 class ConversationSyncResponse(BaseModel):
     conversation_id: str
     message_count: int
-    total_chars: int
+    assistant_reply_count: int | None
+    confirmed_assistant_reply_count: int
+    count_status: Literal['verified', 'legacy_identity_unverified']
     status: Literal["SAVED"] = "SAVED"
     # Legacy wire fields remain inert for already-installed extension clients.
     reasons: list[str] = Field(default_factory=list)

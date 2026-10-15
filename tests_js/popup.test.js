@@ -11,7 +11,7 @@ const source = fs.readFileSync(
 async function makePopup(tabUrl, localHealth, fetchMock) {
     const nodes = {};
     for (const id of [
-        'statusBadge', 'messageCount', 'totalChars',
+        'statusBadge', 'messageCount', 'conversationTitle',
         'reasons', 'handoff', 'connectionNotice',
     ]) {
         nodes[id] = {
@@ -22,9 +22,12 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
     }
     const local = {...localHealth};
     let onChanged;
+    let poll;
+    let activeUrl = tabUrl;
     const context = {
         URL,
         Date,
+        setInterval(fn) {poll=fn; return 1;},
         console: {log() {}, warn() {}, error() {}},
         document: {
             getElementById(id) {return nodes[id];},
@@ -32,7 +35,7 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
         },
         fetch: fetchMock,
         chrome: {
-            tabs: {async query() {return [{id: 17, url: tabUrl}];}},
+            tabs: {async query() {return [{id: 17, url: activeUrl}];}},
             storage: {
                 local: {
                     async get(key) {return {[key]: local[key]};},
@@ -51,7 +54,7 @@ async function makePopup(tabUrl, localHealth, fetchMock) {
     };
     vm.runInNewContext(source, context);
     await new Promise(resolve => setImmediate(resolve));
-    return {nodes, local};
+    return {nodes, local, async navigate(url){activeUrl=url;poll();await new Promise(resolve=>setImmediate(resolve));}};
 }
 
 test('popup restores current conversation from SQLite status even without local cache', async () => {
@@ -65,6 +68,7 @@ test('popup restores current conversation from SQLite status even without local 
                 async json() {return {
                     conversation_id: 'B', status: 'SAVED',
                     message_count: 5, total_chars: 41,
+                    assistant_reply_count:3, count_status:'verified',
                     reasons: [],
                     should_handoff: false,
                 };},
@@ -72,11 +76,10 @@ test('popup restores current conversation from SQLite status even without local 
         },
     );
     assert.equal(p.nodes.statusBadge.textContent, '已保存');
-    assert.equal(p.nodes.messageCount.textContent, 5);
-    assert.equal(p.nodes.totalChars.textContent, '41');
-    assert.match(p.nodes.reasons.textContent, /不代表已采集完整对话/);
+    assert.equal(p.nodes.messageCount.textContent, 3);
+    assert.match(p.nodes.reasons.textContent, /不代表对话已采集完整/);
     assert.equal(p.nodes.handoff.textContent, '');
-    assert.equal(p.local['conversationHealth:B'].message_count, 5);
+    assert.equal(p.local['conversationHealth:B'],undefined,'GET must not create a write acknowledgement');
 });
 
 test('popup refuses to present a deleted DB conversation as current truth', async () => {
@@ -88,7 +91,7 @@ test('popup refuses to present a deleted DB conversation as current truth', asyn
         }},
         async () => ({status: 404, ok: false}),
     );
-    assert.equal(p.nodes.statusBadge.textContent, '--');
+    assert.equal(p.nodes.statusBadge.textContent, '正在采集');
     assert.match(p.nodes.reasons.textContent, /数据库尚无/);
     assert.match(p.nodes.connectionNotice.textContent, /旧状态/);
 });
@@ -97,7 +100,27 @@ test('popup never presents cached risk scores when collector is offline', async 
     const p = await makePopup('https://chatgpt.com/c/A', {
         'conversationHealth:A': {status:'RED',message_count:81,total_chars:9999,reasons:['risk'],should_handoff:true},
     }, async () => {throw new Error('offline');});
-    assert.equal(p.nodes.statusBadge.textContent, '--');
-    assert.match(p.nodes.reasons.textContent, /风险评分已停用/);
+    assert.equal(p.nodes.statusBadge.textContent, '未连接');
+    assert.match(p.nodes.reasons.textContent, /无法确认当前保存结果/);
     assert.equal(p.nodes.handoff.textContent, '');
+});
+
+test('popup follows SPA title, shows only confirmed native Assistant count and no characters',async()=>{
+    const p=await makePopup('https://chatgpt.com/c/A',{
+        'conversationHealth:A':{conversation_id:'A',status:'SAVED',title:'真正的A标题',capture_state:'SAVED',assistant_reply_count:1,count_status:'verified'},
+        'conversationHealth:B':{conversation_id:'B',status:'SAVED',title:'真正的B标题',capture_state:'SAVED'},
+    },async url=>({ok:true,status:200,async json(){const id=url.includes('/A/')?'A':'B';return{conversation_id:id,status:'SAVED',assistant_reply_count:id==='A'?1:null,count_status:id==='A'?'verified':'legacy_identity_unverified'};}}));
+    assert.equal(p.nodes.conversationTitle.textContent,'真正的A标题');assert.equal(p.nodes.messageCount.textContent,1);
+    await p.navigate('https://chatgpt.com/c/B');
+    assert.equal(p.nodes.conversationTitle.textContent,'真正的B标题');assert.equal(p.nodes.messageCount.textContent,'暂不可用');
+    assert.equal(p.nodes.statusBadge.textContent,'已保存');
+    const html=fs.readFileSync(path.join(__dirname,'../shared/chatgpt_bridge/popup.html'),'utf8');
+    assert.doesNotMatch(html,/totalChars|Characters/);assert.doesNotMatch(source,/totalChars|total_chars/);
+});
+
+test('popup distinguishes backend write failure from offline even with cached SAVED',async()=>{
+    const p=await makePopup('https://chatgpt.com/c/A',{
+        'conversationHealth:A':{conversation_id:'A',status:'SAVED',title:'A',capture_state:'FAILED',assistant_reply_count:2,count_status:'verified'},
+    },async()=>({ok:false,status:500}));
+    assert.equal(p.nodes.statusBadge.textContent,'保存失败');assert.equal(p.nodes.messageCount.textContent,'暂不可用');
 });

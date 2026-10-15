@@ -7,7 +7,22 @@ from shared.conversation_store.store import (
     conversation_exists,
     get_messages,
     save_observation,
+    saved_assistant_count,
 )
+
+
+def test_saved_reply_count_is_native_unique_and_excludes_user_empty_and_legacy_guessing(tmp_path):
+    db = tmp_path / 'reply-count.db'
+    init_db(db)
+    messages = [
+        {'key': 'chatgpt:00000000-0000-4000-8000-000000000001:user', 'role': 'user', 'content': 'question'},
+        {'key': 'chatgpt:00000000-0000-4000-8000-000000000002:assistant', 'role': 'assistant', 'content': 'reply'},
+        {'key': 'empty', 'role': 'assistant', 'content': ' \n\t'},
+    ]
+    for _ in range(3): save_observation('native', messages, db)
+    assert saved_assistant_count(get_messages('native', db)) == (1, 'verified', 1)
+    save_observation('native', [{'key':'fallback-turn-0:2:assistant','role':'assistant','content':'old unknown identity'}], db)
+    assert saved_assistant_count(get_messages('native', db)) == (None, 'legacy_identity_unverified', 1)
 
 
 @pytest.mark.parametrize("temporary", ["local-chatgpt:draft", "local-chatgpt%3Adraft"])

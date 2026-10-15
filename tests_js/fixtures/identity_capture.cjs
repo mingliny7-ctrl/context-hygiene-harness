@@ -37,7 +37,7 @@ async function main() {
     const quiet = {log() {}, warn() {}};
     const bridge = path.join(__dirname, '../../shared/chatgpt_bridge');
     vm.runInNewContext(fs.readFileSync(path.join(bridge, 'bridge_worker.js'), 'utf8'), {
-        chrome, console: quiet,
+        chrome, console: quiet, URL,
         async fetch(url, options) {
             assert.equal(url, 'http://127.0.0.1:8000/sync');
             requests.push(JSON.parse(options.body));
@@ -49,10 +49,20 @@ async function main() {
         {key: 'fallback-turn-0:2:assistant', content: 'ChatGPT 说：\n完整回答\n\n```python\nprint("preserved")\n```'},
     ];
     const page = {location: {pathname: '/c/local-chatgpt%3Acontrolled-draft'}, nodes: messages};
+    const roots = new Map();
+    const elements = () => page.nodes.map((m,i)=>({
+        getAttribute(name){return name==='data-content-search-unit-key'?m.key:null;},innerText:m.content,
+        closest(){return {getAttribute(name){return name==='data-chatgpt-search-message-ids'?`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`:name==='data-talvt-turn-state'?'complete':null;}};},
+    }));
     vm.runInNewContext(fs.readFileSync(path.join(bridge, 'conversation_reader.js'), 'utf8'), {
-        chrome, console: quiet, location: page.location,
-        document: {body: {}, querySelectorAll() {
-            return page.nodes.map(m => ({getAttribute() {return m.key;}, innerText: m.content}));
+        chrome, console: quiet, location: page.location, URL,
+        document: {body: {},documentElement:{}, querySelectorAll(selector) {
+            if(selector==='a[href]')return [];
+            if(selector==='[data-app-shell-active-page="true"]'){
+                if(!roots.has(page.location.pathname))roots.set(page.location.pathname,{querySelectorAll:elements});
+                return [roots.get(page.location.pathname)];
+            }
+            return elements();
         }},
         MutationObserver: class {
             constructor(fn) {observerCallback = fn;}
