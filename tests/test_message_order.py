@@ -19,6 +19,10 @@ def test_dom_overlap_places_late_discovered_history_before_new_messages(tmp_path
         assert [m['sourceOrder'] for m in raw['messages']]==list(range(6))
         sync('B',['u1','a1'])
         for _ in range(3): sync('A',['u2','a2'])
+        # Sync legitimately advances conversation.updated_at; compare the final saved snapshot.
+        final=atlas.get('/api/atlas/conversations/A').json()
+        assert final['messages']==raw['messages'] and final['quality']==raw['quality']
+        raw=final
     with TestClient(atlas_app(db)) as restarted:
         assert restarted.get('/api/atlas/conversations/A').json()==raw
 
