@@ -33,7 +33,7 @@ class Service:
 
 def services(root=ROOT):
     return (
-        Service('Collector',8000,'app.main:app',root/'plugins/context_hygiene/backend',
+        Service('Collector',18000,'app.main:app',root/'plugins/context_hygiene/backend',
                 'Context Harness Conversation Collector','/health',('/sync','/conversations/{conversation_id}/status')),
         Service('Atlas',4173,'plugins.conversation_atlas.backend.main:app',root,
                 'Conversation Atlas · read-only Store integration','/api/atlas',('/api/atlas','/api/atlas/conversations/{conversation_id}')),
@@ -74,6 +74,7 @@ def failure_reason(path, offset):
             ('WinError 10048','监听端口已被占用'),
             ('No module named','Python 依赖缺失或模块路径不正确'),
             ('Error loading ASGI app','后端入口加载失败，请检查模块或依赖'),
+            ('WinError 10013','Windows 禁止绑定监听端口，请检查系统保留端口'),
             ('PermissionError','访问所需文件的权限不足'),
             ('database is locked','数据库被其他操作占用'),
             ('unable to open database file','无法打开数据库文件'),
@@ -164,6 +165,8 @@ class Launcher:
                 env['PYTHONPATH']=str(self.root)+(os.pathsep+env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
                 command=[str(self.python),'-m','uvicorn',service.app,'--app-dir',str(service.app_dir),
                          '--host','127.0.0.1','--port',str(service.port)]
+                if service == services(self.root)[0]:
+                    command=[str(self.python),'-m','shared.desktop_host.collector_control']
                 with log.open('ab') as output:
                     log_offset=output.tell()
                     process=subprocess.Popen(command,cwd=self.root,env=env,stdin=subprocess.DEVNULL,
@@ -191,6 +194,11 @@ class Launcher:
             time.sleep(.25)
         result['detail']=detail+'；未确认可用，请检查服务日志或端口占用。没有结束任何服务进程。'
         return result
+
+    def stop_collector(self):
+        from .collector_control import stop_collector
+        with LaunchLock(self.root):
+            return stop_collector(self.root,self.timeout)
 
     def run(self,specs=None,notify=None):
         with LaunchLock(self.root):

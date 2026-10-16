@@ -70,7 +70,7 @@ def test_spawn_uses_existing_python_hidden_flags_and_preserves_private_environme
     result=host.Launcher(log_dir=tmp_path).ensure(spec)
     command=spawn.call_args.args[0];options=spawn.call_args.kwargs
     assert command[0]==str(host.ROOT/'plugins/context_hygiene/.venv/Scripts/python.exe')
-    assert command[1:4]==['-m','uvicorn','app.main:app']
+    assert command[1:]==['-m','shared.desktop_host.collector_control']
     assert options['creationflags'] & subprocess.CREATE_NO_WINDOW
     assert options['env']['DEEPSEEK_API_KEY']=='test-only-not-a-real-key'
     assert options['env']['ATLAS_PRIVATE_ENV']=='private-location'
@@ -111,6 +111,7 @@ def test_startup_timeout_is_failure_not_ready(monkeypatch,tmp_path):
     ('Error loading ASGI app','后端入口加载失败'),
     ('No module named secret-private-name','Python 依赖缺失'),
     ('address already in use','监听端口已被占用'),
+    ('PermissionError: [WinError 10013] bind','Windows 禁止绑定监听端口'),
 ])
 def test_failure_reason_ignores_previous_runs_and_never_echoes_raw_log(tmp_path,marker,expected):
     log=tmp_path/'service.log'

@@ -10,6 +10,13 @@ from shared.desktop_host import native_host as host
 ID='a'*32
 
 
+def test_ping_has_no_service_side_effect(monkeypatch):
+    monkeypatch.setattr(host,'probe',Mock(side_effect=AssertionError('Ping does not probe services')))
+    launcher=Mock()
+    assert host.dispatch({'operation':'ping'},launcher)=={'ok':True,'host':host.HOST_NAME,'protocol_version':1}
+    launcher.run.assert_not_called()
+
+
 def framed(value):
     body=json.dumps(value).encode()
     return struct.pack('<I',len(body))+body

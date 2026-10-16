@@ -38,7 +38,7 @@ async function badgeAllTabsForConversation(conversationId, status) {
 }
 
 async function syncOnce(conversationId, messages, metadata, serial) {
-    const response = await fetch("http://127.0.0.1:8000/sync", {
+    const response = await fetch("http://127.0.0.1:18000/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +167,7 @@ function nativeRequest(operation) {
         const fail=(code,detail)=>{
             // Small diagnostic, no chat bodies, paths, environment or credentials.
             chrome.storage?.local?.set({desktopHostDiagnostic:{code,operation,
-                workerVersion:'1.0.1',extensionId:chrome.runtime.id,at:Date.now()}})?.catch(()=>{});
+                workerVersion:'1.0.3',extensionId:chrome.runtime.id,at:Date.now()}})?.catch(()=>{});
             reject(new Error(`[${code}] ${detail}`));
         };
         if (typeof chrome.runtime.sendNativeMessage!=='function') {
@@ -196,8 +196,13 @@ function nativeRequest(operation) {
     });
 }
 
+async function pingNativeHost() {
+    const pong = await nativeRequest('ping');
+    if (pong.host !== NATIVE_HOST || pong.protocol_version !== 1) throw new Error('本地通信组件握手无效。');
+}
+
 async function existingServiceReady(collector) {
-    const base=collector ? 'http://127.0.0.1:8000' : ATLAS_URL.slice(0,-1);
+    const base=collector ? 'http://127.0.0.1:18000' : ATLAS_URL.slice(0,-1);
     const title=collector ? 'Context Harness Conversation Collector' : 'Conversation Atlas · read-only Store integration';
     try {
         const get=async path => {
@@ -217,21 +222,36 @@ async function existingServiceReady(collector) {
 }
 
 function desktopAction(action) {
-    if (!['start_collector','open_atlas'].includes(action)) return Promise.reject(new Error('不支持的服务操作。'));
+    if (!['check_collector','start_collector','stop_collector','open_atlas'].includes(action)) return Promise.reject(new Error('不支持的服务操作。'));
     if (serviceActions.has(action)) return serviceActions.get(action);
     const run = serviceQueue.catch(() => {}).then(async () => {
+        if (action === 'check_collector') {
+            if (await existingServiceReady(true)) return {ok:true,service:'Collector',ready:true,state:'ready'};
+            await pingNativeHost();
+            const result = await nativeRequest('check_collector');
+            if (result.service !== 'Collector' || !['ready','stopped','conflict','unhealthy'].includes(result.state)
+                || result.ready !== (result.state === 'ready')) throw new Error('本地服务身份响应无效。');
+            return result;
+        }
+        if (action === 'stop_collector') {
+            const result = await nativeRequest('stop_collector');
+            if (result.service !== 'Collector' || result.state !== 'stopped' || result.ready !== false)
+                throw new Error('尚未确认采集服务关闭。');
+            return {ok:true,service:'Collector',ready:false,state:'stopped',message:'采集已关闭'};
+        }
         const collector = action === 'start_collector';
         const service = collector ? 'Collector' : 'Atlas';
         const suffix = collector ? 'collector' : 'atlas';
         // A running healthy backend does not require Native Host registration.
         if (!await existingServiceReady(collector)) {
+            await pingNativeHost();
             let result = await nativeRequest('check_' + suffix);
             if (result.service !== service || typeof result.ready !== 'boolean') throw new Error('本地服务身份响应无效。');
             if (!result.ready) result = await nativeRequest('start_' + suffix);
             if (!result.ready || result.service !== service) throw new Error(result.detail || '服务未通过健康检查。');
         }
         if (!collector) await chrome.tabs.create({url:ATLAS_URL});
-        return {ok:true,ready:true,service,message:collector ? '采集服务运行中' : '图谱服务运行中，已打开图谱'};
+        return {ok:true,ready:true,state:'ready',service,message:collector ? '采集服务运行中' : '图谱服务运行中，已打开图谱'};
     });
     serviceActions.set(action,run);
     serviceQueue=run;

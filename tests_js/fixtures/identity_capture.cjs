@@ -39,7 +39,7 @@ async function main() {
     vm.runInNewContext(fs.readFileSync(path.join(bridge, 'bridge_worker.js'), 'utf8'), {
         chrome, console: quiet, URL,
         async fetch(url, options) {
-            assert.equal(url, 'http://127.0.0.1:8000/sync');
+            assert.equal(url, 'http://127.0.0.1:18000/sync');
             requests.push(JSON.parse(options.body));
             return fetch(`${base}/sync`, options);
         },

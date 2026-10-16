@@ -12,6 +12,20 @@ from .native_host import HOST_NAME
 REGISTRY='Software\\Microsoft\\Edge\\NativeMessagingHosts\\'+HOST_NAME
 
 
+def prompt_extension_id():
+    """Run from Explorer's Windows session when an automation host has a different HKCU view."""
+    config_path=Path(os.environ['LOCALAPPDATA'])/'ContextHarness/native-host/native-config.json'
+    candidate=''
+    if config_path.is_file():
+        config=json.loads(config_path.read_text(encoding='utf8'))
+        if Path(config.get('project_root','')).resolve()==ROOT.resolve():
+            candidate=config.get('extension_id','')
+    if not isinstance(candidate,str) or not re.fullmatch('[a-p]{32}',candidate):candidate=''
+    print('Register Native Host for the Windows user running this installer. No services will be started.')
+    value=input('Edge extension ID'+(' ['+candidate+']' if candidate else '')+': ').strip()
+    return value or candidate
+
+
 def install(extension_id):
     if not re.fullmatch('[a-p]{32}',extension_id):raise ValueError('Invalid Edge extension ID')
     directory=Path(os.environ['LOCALAPPDATA'])/'ContextHarness/native-host'
@@ -60,5 +74,6 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser()
     group=parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--extension-id');group.add_argument('--unregister',action='store_true')
+    group.add_argument('--interactive',action='store_true')
     args=parser.parse_args()
-    print(json.dumps(unregister() if args.unregister else install(args.extension_id)))
+    print(json.dumps(unregister() if args.unregister else install(prompt_extension_id() if args.interactive else args.extension_id)))

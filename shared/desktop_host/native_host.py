@@ -1,5 +1,6 @@
 """One framed request from the allowlisted Edge extension; no arbitrary commands."""
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import struct
@@ -10,7 +11,7 @@ from shared.desktop_host.launcher import Launcher, LaunchBusy, ROOT, probe, serv
 
 HOST_NAME='com.context_harness.desktop_host'
 OPERATIONS={'check_collector':(0,False),'start_collector':(0,True),
-            'check_atlas':(1,False),'start_atlas':(1,True)}
+            'check_atlas':(1,False),'start_atlas':(1,True),'stop_collector':(0,True)}
 MAX_MESSAGE=4096
 
 
@@ -46,14 +47,18 @@ def authorized(config,origin):
 
 def dispatch(request,launcher=None):
     if (not isinstance(request,dict) or set(request)!={'operation'} or not isinstance(request.get('operation'),str)
-            or request['operation'] not in OPERATIONS):
-        return {'ok':False,'code':'INVALID_OPERATION','error':'只允许固定的采集/图谱检查与启动操作。'}
+            or request['operation'] not in (*OPERATIONS,'ping')):
+        return {'ok':False,'code':'INVALID_OPERATION','error':'只允许固定的服务检查、启动及关闭采集操作。'}
+    if request['operation']=='ping':
+        return {'ok':True,'host':HOST_NAME,'protocol_version':1}
     index,start=OPERATIONS[request['operation']]
     service=services()[index]
     if not start:
         state,detail=probe(service)
         return {'ok':True,'service':service.name,'state':state,'ready':state=='ready','detail':detail}
     try:
+        if request['operation']=='stop_collector':
+            return (launcher or Launcher()).stop_collector()
         result=(launcher or Launcher()).run((service,))['services'][0]
     except LaunchBusy:
         return {'ok':False,'code':'LAUNCH_BUSY','error':'服务启动检查正在进行，请稍后重试。'}
@@ -77,6 +82,16 @@ def main(argv=None,stdin=None,stdout=None):
             return 1
         request=read_message(stdin or sys.stdin.buffer)
         result=dispatch(request)
+        # Fixed operation/status only; never persist request bodies, chat text or environment.
+        if isinstance(request,dict) and isinstance(request.get('operation'),str) and request['operation'] in (*OPERATIONS,'ping'):
+            try:
+                log=Path(args[0]).with_name('operations.log')
+                with log.open('a',encoding='utf8') as output_log:
+                    output_log.write(json.dumps({'at':datetime.now(timezone.utc).isoformat(),
+                        'operation':request['operation'],'ok':result.get('ok'),
+                        'state':result.get('state'),'code':result.get('code')})+'\n')
+            except OSError:
+                pass
     except (ValueError,KeyError,OSError,TypeError):
         result={'ok':False,'code':'INVALID_REQUEST','error':'Native Host 请求或注册配置无效。'}
     write_message(output,result)

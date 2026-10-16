@@ -97,7 +97,7 @@ async function refreshPopup() {
     // SQLite is authoritative; GET restores even after extension restarts.
     try {
         const response = await fetch(
-            `http://127.0.0.1:8000/conversations/${encodeURIComponent(id)}/status`
+            `http://127.0.0.1:18000/conversations/${encodeURIComponent(id)}/status`
         );
         if (requestSerial !== serial || currentConversationId !== id) return;
         if (response.status === 404) {
@@ -134,7 +134,7 @@ async function refreshPopup() {
         waiting('无法确认当前保存结果，请检查本地采集服务。', _error.httpStatus ? 'FAILED' : 'DISCONNECTED');
         connectionNotice.textContent = saved[key]
             ? "无法确认当前数据库状态，请检查本地采集服务。"
-            : "无法连接本地后端：请点击下方“启动采集”。";
+            : "无法连接本地后端：请点击下方“启动服务”。";
     }
 }
 

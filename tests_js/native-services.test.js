@@ -11,7 +11,7 @@ function makeWorker(respond,fetchMock=async()=>{throw new Error('not running');}
     const calls=[],tabs=[];
     const runtime={id:'trusted-id',getURL:name=>'chrome-extension://trusted-id/'+name,
         onMessage:{addListener(fn){listener=fn;}},
-        sendNativeMessage(host,payload,callback){calls.push({host,...payload});Promise.resolve().then(()=>respond(payload.operation)).then(callback);},
+        sendNativeMessage(host,payload,callback){calls.push({host,...payload});Promise.resolve().then(()=>payload.operation==='ping' ? {ok:true,host,protocol_version:1} : respond(payload.operation)).then(callback);},
     };
     const chrome={runtime,tabs:{async create(tab){tabs.push(tab);},onRemoved:{addListener(){}}}};
     vm.runInNewContext(worker,{chrome,URL,fetch:fetchMock,console:{log(){},warn(){}}});
@@ -24,21 +24,21 @@ function makeWorker(respond,fetchMock=async()=>{throw new Error('not running');}
 test('collector starts only Collector and never navigates',async()=>{
     const w=makeWorker(op=>({ok:true,service:'Collector',ready:op==='start_collector'}));
     assert.equal((await w.send('start_collector')).message,'采集服务运行中');
-    assert.deepEqual(w.calls.map(c=>c.operation),['check_collector','start_collector']);
+    assert.deepEqual(w.calls.map(c=>c.operation),['ping','check_collector','start_collector']);
     assert.equal(w.tabs.length,0);
 });
 
 test('Atlas starts independently and opens fixed graph URL only after health',async()=>{
     const w=makeWorker(op=>({ok:true,service:'Atlas',ready:op==='start_atlas'}));
     assert.equal((await w.send('open_atlas')).ok,true);
-    assert.deepEqual(w.calls.map(c=>c.operation),['check_atlas','start_atlas']);
+    assert.deepEqual(w.calls.map(c=>c.operation),['ping','check_atlas','start_atlas']);
     assert.equal(w.tabs[0].url,'http://127.0.0.1:4173/');
 });
 
 test('ready Atlas reuses service and ignores any URL in native reply',async()=>{
     const w=makeWorker(()=>({ok:true,service:'Atlas',ready:true,url:'https://bad.invalid'}));
     await w.send('open_atlas');
-    assert.deepEqual(w.calls.map(c=>c.operation),['check_atlas']);
+    assert.deepEqual(w.calls.map(c=>c.operation),['ping','check_atlas']);
     assert.equal(w.tabs[0].url,'http://127.0.0.1:4173/');
 });
 
@@ -56,14 +56,14 @@ test('already healthy backends work even without Native Host and do not start pe
         assert.equal((await w.send(collector ? 'start_collector' : 'open_atlas')).ok,true);
         assert.equal(w.calls.length,0);
         assert.equal(w.tabs.length,collector ? 0 : 1);
-        assert.ok(urls.every(url=>url.startsWith(collector ? 'http://127.0.0.1:8000/' : 'http://127.0.0.1:4173/')));
+        assert.ok(urls.every(url=>url.startsWith(collector ? 'http://127.0.0.1:18000/' : 'http://127.0.0.1:4173/')));
     }
 });
 
 test('concurrent duplicate Atlas clicks share native request and one tab',async()=>{
     const w=makeWorker(()=>({ok:true,service:'Atlas',ready:true}));
     await Promise.all([w.send('open_atlas'),w.send('open_atlas')]);
-    assert.equal(w.calls.length,1);assert.equal(w.tabs.length,1);
+    assert.deepEqual(w.calls.map(c=>c.operation),['ping','check_atlas']);assert.equal(w.tabs.length,1);
 });
 
 test('host failure and mismatched identity never open Atlas',async()=>{
@@ -113,13 +113,41 @@ test('native host discovery errors identify the failed stage in Popup feedback',
     }
 });
 
+test('collector status query never launches; stop only targets Collector and waits for stopped',async()=>{
+    const w=makeWorker(op=>({ok:true,service:'Collector',state:'stopped',ready:false}));
+    assert.equal((await w.send('check_collector')).state,'stopped');
+    assert.deepEqual(w.calls.map(c=>c.operation),['ping','check_collector']);
+    assert.equal((await w.send('stop_collector')).state,'stopped');
+    assert.equal(w.calls.at(-1).operation,'stop_collector');
+    assert.equal(w.tabs.length,0);
+    const bad=makeWorker(()=>({ok:true,service:'Atlas',state:'stopped',ready:false}));
+    assert.equal((await bad.send('stop_collector')).ok,false);
+});
+
+test('Popup checks initial state, closes running Collector and then offers start',async()=>{
+    const nodes=Object.fromEntries(['startCollector','openAtlas','serviceActionNotice'].map(id=>[id,{textContent:'',disabled:false,addEventListener(_,fn){this.click=fn;}}]));
+    const calls=[];
+    vm.runInNewContext(controls,{document:{getElementById:id=>nodes[id]},setInterval(){},chrome:{runtime:{sendMessage:async payload=>{
+        calls.push(payload.action);
+        return {ok:true,service:'Collector',ready:payload.action==='check_collector',state:payload.action==='stop_collector'?'stopped':'ready',message:'已关闭采集'};
+    }}}});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(nodes.startCollector.textContent,'关闭服务');
+    assert.equal(calls[0],'check_collector');
+    await nodes.startCollector.click();
+    assert.equal(calls[1],'stop_collector');
+    assert.equal(nodes.startCollector.textContent,'启动服务');
+});
+
 test('Popup keeps pending disabled then shows only confirmed service status',async()=>{
     const nodes=Object.fromEntries(['startCollector','openAtlas','serviceActionNotice'].map(id=>[id,{textContent:'',disabled:false,addEventListener(_,fn){this.click=fn;}}]));
     let finish;
     const calls=[];
-    vm.runInNewContext(controls,{document:{getElementById:id=>nodes[id]},chrome:{runtime:{sendMessage:payload=>{
+    vm.runInNewContext(controls,{document:{getElementById:id=>nodes[id]},setInterval(){},chrome:{runtime:{sendMessage:payload=>{
+        if(payload.action==='check_collector') return Promise.resolve({ok:true,ready:false,state:'stopped'});
         calls.push(payload);return new Promise(resolve=>{finish=resolve;});
     }}}});
+    await new Promise(resolve=>setImmediate(resolve));
     const pending=nodes.startCollector.click();
     assert.equal(nodes.startCollector.disabled,true);
     assert.match(nodes.serviceActionNotice.textContent,/正在检查/);
@@ -129,4 +157,25 @@ test('Popup keeps pending disabled then shows only confirmed service status',asy
     assert.equal(calls[0].action,'start_collector');
     const failed=nodes.openAtlas.click();finish({ok:false,error:'端口占用'});await failed;
     assert.equal(nodes.serviceActionNotice.textContent,'端口占用');
+});
+
+test('failed close keeps running state; delayed pre-click status cannot undo a successful close',async()=>{
+    const nodes=Object.fromEntries(['startCollector','openAtlas','serviceActionNotice'].map(id=>[id,{textContent:'',disabled:false,addEventListener(_,fn){this.click=fn;}}]));
+    let poll,late,checks=0,fail=true;
+    vm.runInNewContext(controls,{document:{getElementById:id=>nodes[id]},setInterval(fn){poll=fn;},chrome:{runtime:{sendMessage:async payload=>{
+        if(payload.action==='check_collector') {
+            if(++checks===1) return {ok:true,ready:true,state:'ready'};
+            return new Promise(resolve=>{late=resolve;});
+        }
+        return fail ? {ok:false,error:'无法安全关闭旧服务'} : {ok:true,ready:false,state:'stopped',message:'采集已关闭'};
+    }}}});
+    await new Promise(resolve=>setImmediate(resolve));
+    await nodes.startCollector.click();
+    assert.equal(nodes.startCollector.textContent,'关闭服务');
+    assert.match(nodes.serviceActionNotice.textContent,/无法安全关闭/);
+    const checking=poll();
+    fail=false;
+    await nodes.startCollector.click();
+    late({ok:true,ready:true,state:'ready'});await checking;
+    assert.equal(nodes.startCollector.textContent,'启动服务');
 });
