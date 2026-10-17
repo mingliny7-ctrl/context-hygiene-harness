@@ -179,7 +179,7 @@ class IncrementalIndex:
             result.update(status='review_required', reason='ORDER_CHANGED')
         return result
 
-    def plan(self, cid, *, max_input_bytes=24000, max_context_bytes=4000):
+    def plan(self, cid, *, max_input_bytes=24000, max_context_bytes=4000, complete_turns=False, through_key=None, context_excerpt=False):
         """Read-only context/pending contract. UTF-8 bytes are a conservative token upper bound."""
         if not 0 <= max_context_bytes < max_input_bytes or max_input_bytes < 4096:
             raise IndexErrorState('INVALID_BUDGET')
@@ -211,12 +211,35 @@ class IncrementalIndex:
                 m = source_map[old['key']]
                 candidate = [{'key': m['key'], 'role': m['role'], 'content': m['content']}] + context['messages']
                 if len(encoded({**context, 'messages': candidate}).encode()) > max_context_bytes:
+                    if context_excerpt and not context['messages']:
+                        # Context may carry explicitly labelled excerpts; pending is NEVER truncated.
+                        tail_messages = [source_map[entry['key']] for entry in members if entry['segment_id'] == tail['segment_id']]
+                        starts = [j for j, entry in enumerate(tail_messages) if entry['role'] == 'user'
+                                  and (j == 0 or tail_messages[j - 1]['role'] == 'assistant')]
+                        pair = tail_messages[starts[-1]:] if starts else []
+                        lo, hi = 1, max((len(entry['content']) for entry in pair), default=0)
+                        while lo <= hi:
+                            limit = (lo + hi) // 2
+                            excerpts = [{'key': entry['key'], 'role': entry['role'], 'content': entry['content'][:limit],
+                                         'contextExcerpt': len(entry['content']) > limit,
+                                         'sourceCharRange': [0, min(limit, len(entry['content']))]} for entry in pair]
+                            if len(encoded({**context, 'messages': excerpts}).encode()) <= max_context_bytes:
+                                context['messages'] = excerpts; lo = limit + 1
+                            else:
+                                hi = limit - 1
                     break
                 context['messages'] = candidate
+            if complete_turns:
+                while context['messages'] and context['messages'][0]['role'] != 'user':
+                    context['messages'].pop(0)
+        candidates = [m for m in messages if m['key'] not in known]
+        if through_key is not None:
+            keys = [m['key'] for m in candidates]
+            if through_key not in keys:
+                raise IndexErrorState('SOURCE_CHANGED')
+            candidates = candidates[:keys.index(through_key) + 1]
         pending = []
-        for m in messages:
-            if m['key'] in known:
-                continue
+        for m in candidates:
             item = {k: m[k] for k in ('key', 'role', 'content')}
             # Reserve 2048 bytes for prompt/schema; no body truncation or full-history fallback.
             if len(encoded({'context': context, 'pending': pending + [item]}).encode()) + 2048 > max_input_bytes:
@@ -224,11 +247,18 @@ class IncrementalIndex:
                     raise IndexErrorState('MESSAGE_TOO_LARGE')
                 break
             pending.append(item)
+        if complete_turns and pending:
+            ends = turn_ends(candidates)
+            fitting = [end for end in ends if end <= len(pending)]
+            if not fitting:
+                raise IndexErrorState('INCOMPLETE_TURN' if not ends else 'TURN_TOO_LARGE')
+            pending = pending[:max(fitting)]
         manifest = {'conversation_id': cid, 'pending': [fingerprint(m) for m in pending],
-                    'context': [fingerprint(m) for m in context['messages']],
+                    'context': [fingerprint(next(original for original in messages if original['key'] == m['key'])) for m in context['messages']],
                     'context_segment': context['segment'], 'base_digest': digest([members, segments]),
                     'schema_version': SCHEMA_VERSION, 'algorithm_version': ALGORITHM_VERSION,
-                    'max_input_bytes': max_input_bytes, 'max_context_bytes': max_context_bytes}
+                    'max_input_bytes': max_input_bytes, 'max_context_bytes': max_context_bytes,
+                    'complete_turns': complete_turns, 'through_key': through_key, 'context_excerpt': context_excerpt}
         return {'conversation_id': cid, 'context': context, 'pending': pending, 'manifest': manifest,
                 'input_byte_upper_bound': len(encoded({'context': context, 'pending': pending}).encode()) + 2048,
                 'remaining_count': len(status['appended']) - len(pending)}
@@ -241,7 +271,7 @@ class IncrementalIndex:
         if not manifest['pending']:
             return {'batch_id': None, 'created': False, 'status': 'no_changes'}
         cid = manifest['conversation_id']
-        fresh = self.plan(cid, max_input_bytes=manifest['max_input_bytes'], max_context_bytes=manifest['max_context_bytes'])
+        fresh = self.plan(cid, **plan_options(manifest))
         if fresh['manifest'] != manifest:
             raise IndexErrorState('STALE_PLAN')
         batch_id = digest(manifest)
@@ -292,7 +322,7 @@ class IncrementalIndex:
             raise IndexErrorState('BATCH_NOT_PREPARED')
         manifest = json.loads(job['manifest_json'])
         cid = job['conversation_id']
-        current = self.plan(cid, max_input_bytes=manifest['max_input_bytes'], max_context_bytes=manifest['max_context_bytes'])
+        current = self.plan(cid, **plan_options(manifest))
         # Unrelated future append is allowed, but the prepared pending prefix must remain exact.
         n = len(manifest['pending'])
         if (current['manifest']['base_digest'] != manifest['base_digest'] or
@@ -377,3 +407,17 @@ class IncrementalIndex:
         quality = self.inspect(cid)
         return {'segments': [{**s, 'analysis': json.loads(s['analysis_json'])} for s in segments],
                 'source_status': quality['status'], 'source_reason': quality['reason']}
+
+
+def turn_ends(messages):
+    """Consecutive User(s) + Assistant(s); no fixed message-count splitting."""
+    if messages and messages[0]['role'] != 'user':
+        raise IndexErrorState('INCOMPLETE_TURN')
+    return [i + 1 for i, m in enumerate(messages) if m['role'] == 'assistant'
+            and (i + 1 == len(messages) or messages[i + 1]['role'] == 'user')]
+
+
+def plan_options(manifest):
+    return {key: manifest.get(key, default) for key, default in (
+        ('max_input_bytes', 24000), ('max_context_bytes', 4000),
+        ('complete_turns', False), ('through_key', None), ('context_excerpt', False))}

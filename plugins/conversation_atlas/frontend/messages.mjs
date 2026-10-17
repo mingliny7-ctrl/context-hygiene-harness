@@ -57,3 +57,30 @@ export function openMessages(detail, title, messageKey = null) {
   if (messageKey) jumpTo(messageKey);
   else list.scrollTop = 0;
 }
+
+/** Exact Store text, rendered with safe DOM nodes; no model-authored body or HTML execution. */
+export function openAnswer(detail, title) {
+  let dialog = document.getElementById('raw-dialog');
+  if (!dialog) { dialog = make('dialog','raw-dialog'); dialog.id='raw-dialog'; document.body.append(dialog); }
+  dialog.replaceChildren(); dialog.setAttribute('aria-label','关键回答完整原文');
+  const header=make('header','raw-header');
+  const heading=make('div'); heading.append(make('span','eyebrow','原始对话 / 完整回答'),make('h2','',title));
+  const close=make('button','quiet-button','关闭原文'); close.addEventListener('click',()=>dialog.close());
+  header.append(heading,close); dialog.append(header);
+  dialog.append(make('p','prototype-note',detail.contextStatus==='ordered_adjacent' ? '用户提问按已确认的相邻顺序关联；未验证分支父子关系。' : '无法可靠关联用户提问，以下仅展示已定位的模型原文。'));
+  const list=make('div','raw-message-list');
+  for (const message of [...detail.questions,detail.answer]) {
+    const article=make('article','raw-message'); article.dataset.messageKey=message.key;
+    article.append(make('h3','',message.role==='user' ? '用户提问' : '模型回答全文'));
+    article.append(make('small','',message.source_created_at != null ? `原始创建时间：${new Date(message.source_created_at*1000).toLocaleString('zh-CN')}` : '原始发送时间未采集'));
+    const body=make('div','raw-prose');
+    const parts=message.content.split(/(```[^\n]*\n[\s\S]*?(?:```|$))/g);
+    for(const part of parts) {
+      if(part.startsWith('```')) {const pre=make('pre');pre.append(make('code','',part.replace(/^```[^\n]*\n/,'').replace(/```$/,'')));body.append(pre);}
+      else body.append(make('div','',part));
+    }
+    const original=make('details'); original.append(make('summary','','查看原始文本与来源定位'),make('code','',message.key),make('pre','',message.content));
+    article.append(body,original); list.append(article);
+  }
+  dialog.append(list); dialog.showModal(); list.scrollTop=0;
+}

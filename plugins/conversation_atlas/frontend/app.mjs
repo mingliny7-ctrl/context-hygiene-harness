@@ -1,5 +1,6 @@
 import { loadAtlas, loadConversation, searchAtlas } from './data/atlas-source.mjs';
-import { openMessages } from './messages.mjs';
+import { openMessages, openAnswer } from './messages.mjs';
+import { IndexControls, indexRequest, indexReason } from './index-controls.mjs';
 import { computeLayout, bezierPath } from './layout.mjs';
 import { ParticleField } from './particles.mjs';
 
@@ -32,6 +33,9 @@ let resizeObserver;
 let latestResults = [];
 let detailController;
 let detailGeneration = 0;
+let indexControls;
+let pollTimer;
+let refreshingGraph = false;
 const sourceMode = new URLSearchParams(location.search).get('source') === 'demo' ? 'demo' : 'real';
 const isReal = () => data?.provenance.mode === 'real';
 
@@ -59,6 +63,7 @@ function choose(entity) {
   }
   renderInspector();
   renderGraph();
+  updateAnalysisScope();
   const viewport = $('graph-viewport');
   const selectedNode = currentLayout.nodes.find((item) => item.id === entity.id);
   viewport.scrollTo({
@@ -81,6 +86,7 @@ function returnToAtlas() {
   renderInspector();
   renderGraph();
   $('graph-viewport').scrollTo({ left: Math.max(0, ($('graph-scene').clientWidth - $('graph-viewport').clientWidth) / 2), top: 0, behavior: reducedMotion() ? 'instant' : 'smooth' });
+  updateAnalysisScope();
   $('home-nav').focus({ preventScroll: true });
   announce('已返回 Atlas 全景');
 }
@@ -119,7 +125,7 @@ function renderGraph() {
   const conversation = data.conversations.find((item) => item.id === state.conversationId);
   $('breadcrumb-text').textContent = expanded ? [category?.title, conversation?.title].filter(Boolean).join(' / ') : '你的思考，自有引力。';
   $('view-label').textContent = conversation && isReal() ? '03 / STORED CONVERSATION' : conversation ? '03 / DISCUSSION SEGMENTS' : expanded ? '02 / CONVERSATIONS' : 'OVERVIEW / 全景';
-  $('graph-hint').textContent = isReal() && !data.conversations.length ? '暂无已存储会话 · 打开已有 ChatGPT 对话并使用现有采集扩展同步' : window.innerWidth < 1100 ? '滚动探索图谱 · 点击节点查看详情' : conversation && isReal() ? '讨论阶段尚未处理 · 在详情中定位已存储原文' : conversation ? '选择讨论阶段，回看每一步思考与决定' : expanded ? '选择一段对话，查看已存储内容' : '选择一颗星球，沿着思考的轨迹探索';
+  $('graph-hint').textContent = isReal() && !data.conversations.length ? '暂无已存储会话 · 打开已有 ChatGPT 对话并使用现有采集扩展同步' : window.innerWidth < 1100 ? '滚动探索图谱 · 点击节点查看详情' : conversation && isReal() ? '选择主题查看关键回答 · 仅手动分析新增内容' : conversation ? '选择讨论阶段，回看每一步思考与决定' : expanded ? '选择一段对话，查看已存储内容' : '选择一颗星球，沿着思考的轨迹探索';
   const viewport = $('graph-viewport');
   const width = Math.max(1000, viewport.clientWidth);
   const height = Math.max(500, viewport.clientHeight);
@@ -158,7 +164,7 @@ function renderGraph() {
     button.style.height = `${item.height}px`;
     button.style.setProperty('--node-color', categoryFor(item.entity)?.color || '#d0d4ab');
     button.querySelector('.node-title').textContent = item.entity.title;
-    button.querySelector('.node-meta').textContent = item.kind === 'category' ? `${data.conversations.filter((entry) => entry.categoryId === item.id).length} 段对话 · 点击探索` : item.kind === 'conversation' && isReal() ? `${item.entity.messageCount} 条 · ${item.id.slice(-8)} · ${item.entity.quality?.suspectedTestRecord ? '疑似测试' : '未处理'}` : item.kind === 'conversation' ? `${formatDate(item.entity.updatedAt)} · ${item.entity.segmentCount} 个讨论阶段` : `阶段 ${String(item.entity.order).padStart(2, '0')} · ${item.entity.messageCount} 条消息`;
+    button.querySelector('.node-meta').textContent = item.kind === 'category' ? `${data.conversations.filter((entry) => entry.categoryId === item.id).length} 段对话 · 点击探索` : item.kind === 'conversation' && isReal() ? `${item.entity.messageCount} 条消息 · ${item.entity.segmentCount || 0} 个主题 · ${item.entity.indexState?.status === 'ready' ? (item.entity.indexState.appended.length ? '有新增' : '已索引') : '来源待确认'}` : item.kind === 'conversation' ? `${formatDate(item.entity.updatedAt)} · ${item.entity.segmentCount} 个讨论阶段` : `阶段 ${String(item.entity.order).padStart(2, '0')} · ${item.entity.messageCount} 条消息`;
     button.setAttribute('aria-label', `${typeName[item.kind]}：${item.entity.title}`);
     button.title = item.entity.title;
     button.setAttribute('aria-pressed', String(item.id === state.selectedId));
@@ -180,7 +186,7 @@ function renderGraph() {
     button.inert = true;
     button.tabIndex = -1;
     const entity = entityById(id);
-    const parentId = entity.kind === 'segment' ? entity.conversationId : entity.categoryId;
+    const parentId = entity?.kind === 'segment' ? entity.conversationId : entity?.categoryId;
     const parent = nextNodes.get(parentId) || layout.core;
     button.style.left = `${parent.x}px`;
     button.style.top = `${parent.y}px`;
@@ -252,7 +258,7 @@ function renderInspector() {
   panel.append(top, badge, el('h2', '', entity.title), el('p', 'inspector-summary', entity.summary));
   const outcomes = el('ul', 'outcomes');
   entity.outcomes.forEach((text) => outcomes.append(el('li', '', text)));
-  if (isReal() && !entity.outcomes.length) outcomes.append(el('li', '', '尚未生成结论；当前只读取已存储原文。'));
+  if (isReal() && !entity.outcomes.length) outcomes.append(el('li', '', entity.kind === 'conversation' && entity.segmentCount ? '选择右侧主题，查看该主题的结论与关键回答。' : '暂无经引用校验的结论。'));
   panel.append(inspectorSection('关键结论 / OUTCOMES', outcomes));
   const keywords = el('div', 'keywords');
   entity.keywords.forEach((word) => keywords.append(el('span', 'keyword', word)));
@@ -260,18 +266,19 @@ function renderInspector() {
   panel.append(inspectorSection('思考的关键词', keywords));
   const metadata = el('dl', 'metadata');
   const rows = [
-    [isReal() ? '首次入库时间' : '创建时间', dateTime(entity.createdAt)],
-    [isReal() ? '最近同步时间' : '最近更新', dateTime(entity.updatedAt)],
+    [isReal() ? (entity.kind === 'segment' ? '原始讨论时间' : '首次入库时间') : '创建时间', dateTime(entity.createdAt)],
+    [isReal() ? (entity.kind === 'segment' ? '索引完成时间' : '最近同步时间') : '最近更新', dateTime(entity.updatedAt)],
     ['所属主题', categoryFor(entity)?.title || entity.title],
     ['消息数量', `${entity.messageCount} 条${isReal() ? ' · 已存储' : ' · 模拟'}`],
   ];
   if (entity.kind === 'category') rows.push(['包含对话', `${entity.conversationCount} 段`]);
-  if (entity.kind === 'conversation') rows.push(['讨论阶段', isReal() ? '未处理' : `${entity.segmentCount} 个`]);
+  if (entity.kind === 'conversation') { rows.push(['讨论主题', `${entity.segmentCount || 0} 个`]); if (isReal()) rows.push(['标题来源', entity.titleSource === 'first_segment_ai_title' ? '首个主题的 AI 展示名，非 ChatGPT 原始标题' : '已采集原文摘录，非原始标题']); }
   rows.forEach(([key, value]) => metadata.append(el('dt', '', key), el('dd', '', value)));
   panel.append(inspectorSection('时间与关联', metadata));
   if (entity.kind === 'segment') {
     const range = el('div', 'message-range');
-    range.append(el('div', '', `消息 ${entity.messageIndexRange.start}–${entity.messageIndexRange.end} · 模拟范围`), el('div', '', entity.messageRange.start), el('div', '', entity.messageRange.end));
+    range.append(el('div', '', `消息 ${entity.messageIndexRange.start}–${entity.messageIndexRange.end} · ${isReal() ? '已持久化来源范围' : '模拟范围'}`));
+    const refs = el('details'); refs.append(el('summary','','来源消息定位'),el('div','',entity.messageRange.start),el('div','',entity.messageRange.end)); range.append(refs);
     panel.append(inspectorSection('可追溯消息范围', range));
   }
   if (entity.kind === 'conversation' && !isReal()) {
@@ -289,14 +296,16 @@ function renderInspector() {
   }
   if (isReal()) {
     if (entity.kind === 'conversation') {
-      panel.querySelector('.inspector-summary').prepend(document.createTextNode('原文摘录（非 AI 摘要）：'));
+      if (entity.summarySource === 'verbatim_excerpt') panel.querySelector('.inspector-summary').prepend(document.createTextNode('原文摘录（非 AI 摘要）：'));
       const q = entity.quality || {};
-      panel.append(el('div', 'prototype-note', `完整性未知 · ${q.emptyMessageCount || 0} 条空正文 · ${q.fallbackKeyCount || 0} 条 fallback 键。仅保证首次观察顺序。${q.suspectedTestRecord ? ' 此 ID 带 test- 前缀，疑似测试记录；未当作真实用户成果。' : ''}`));
+      panel.append(el('div', 'prototype-note', `完整性未知 · ${q.emptyMessageCount || 0} 条空正文 · ${q.fallbackKeyCount || 0} 条 fallback 键。可信顺序与可分析性见上方状态；采集时间不代表讨论时间。${q.suspectedTestRecord ? ' 此 ID 带 test- 前缀，疑似测试记录；未当作真实用户成果。' : ''}`));
       loadInspectorMessages(entity, panel);
+    } else if (entity.kind === 'segment') {
+      renderKeyAnswers(entity, panel);
     } else {
       panel.append(el('div', 'prototype-note', '未分类是当前 UI 的虚拟分组，不是 AI 分析结果。尚未生成摘要、关键词、结论或讨论阶段。'));
     }
-    panel.append(el('div', 'inspector-id', `${entity.kind === 'category' ? 'VIRTUAL GROUP ID' : 'DATABASE ID'} / ${entity.id}`));
+    if (entity.kind === 'segment') panel.append(el('div', 'prototype-note', 'AI 生成的语义导航，尚未经人工确认；原始发送时间未采集时不以索引时间替代。'));
     panel.scrollTop = 0;
     return;
   }
@@ -325,14 +334,7 @@ async function loadInspectorMessages(entity, panel) {
     open.textContent = `查看全部 ${detail.messages.length} 条原始消息`;
     open.disabled = false;
     open.addEventListener('click', () => openMessages(detail, entity.title, entity.previewMessageKey));
-    content.append(el('p', 'inspector-summary', `${detail.messages.length} 条已存储消息 · 点击预览定位`));
-    detail.messages.slice(0, 4).forEach((message, index) => {
-      const button = el('button', 'message-preview');
-      button.dataset.messageKey = message.key;
-      button.append(el('small', '', `${message.sourceOrder != null ? '对话顺序 '+(message.sourceOrder+1) : '相对或历史顺序，详见原文'} · ${message.role}`), el('span', '', message.content.trim() ? message.content.slice(0, 130) : '〔正文为空〕'), el('code', '', message.key));
-      button.addEventListener('click', () => openMessages(detail, entity.title, message.key));
-      content.append(button);
-    });
+    content.append(el('p', 'inspector-summary', `${detail.messages.length} 条已存储消息 · 主题与关键回答在图谱中展开，原文入口可读取全部记录。`));
     if (!detail.messages.length) content.append(el('p', 'empty-search', '此会话尚无已存储消息。'));
   } catch (error) {
     if (generation !== detailGeneration || detailController.signal.aborted) return;
@@ -428,7 +430,7 @@ function setupEvents() {
     if (!event.target.closest('.search-dock')) closeSearch();
     if (!event.target.closest('#recent-toggle, #recent-panel')) closeRecent();
   });
-  window.addEventListener('pagehide', () => { field.destroy(); resizeObserver.disconnect(); removalTimers.forEach(clearTimeout); });
+  window.addEventListener('pagehide', () => { clearInterval(pollTimer); field.destroy(); resizeObserver.disconnect(); removalTimers.forEach(clearTimeout); });
   window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => renderGraph());
 }
 
@@ -448,18 +450,22 @@ try {
   $('search-input').setAttribute('aria-label', isReal() ? '搜索已存储会话' : '搜索演示对话');
   if (isReal()) {
     $('search-scope').textContent = '标题 / 摘录 / ID · 关键词匹配';
-    $('guide-note').textContent = '当前读取现有 SQLite。完整历史与原始顺序未验证；分类、阶段和结论尚未处理。点击会话详情中的原文入口，可按存储消息键定位记录。演示模式只可通过 ?source=demo 明确开启。';
+    $('guide-note').textContent = '当前读取现有 SQLite 与已完成索引。选择对话后可手动分析新增内容；打开和切换页面不调用模型。主题中的关键回答可定位完整原文。完整历史仍未知。演示模式只可通过 ?source=demo 明确开启。';
     const q = data.quality || {};
     $('data-notice').hidden = false;
     $('data-notice').textContent = `${data.conversations.length} 条持久化会话 · ${q.messageCount || 0} 条消息 · ${q.emptyMessageCount || 0} 条空正文 · 完整性未知${q.suspectedTestRecordCount ? ` · 含 ${q.suspectedTestRecordCount} 条疑似测试 ID` : ''}`;
   }
-  const stats = isReal() ? [[data.conversations.length, '存储会话'], [data.quality?.messageCount || 0, '已采集消息'], [data.segments.length, '阶段 · 待处理']] : [ [data.categories.length, '主题星球'], [data.conversations.length, '段对话'], [data.segments.length, '个讨论阶段'] ];
+  const stats = isReal() ? [[data.conversations.length, '存储会话'], [data.quality?.messageCount || 0, '已采集消息'], [data.segments.length, '已索引主题']] : [ [data.categories.length, '主题星球'], [data.conversations.length, '段对话'], [data.segments.length, '个讨论阶段'] ];
   stats.forEach(([count, label], index) => { if (index) $('universe-stats').append(el('span', 'stat-separator')); const stat = el('span', 'stat'); stat.append(el('strong', '', String(count).padStart(2, '0')), el('span', '', label)); $('universe-stats').append(stat); });
   $('recent-count').textContent = String(data.conversations.length).padStart(2, '0');
   $('recent-panel').append(el('h2', '', isReal() ? '最近入库会话 / SQLite' : '最近对话 / 演示数据'));
   [...data.conversations].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '') || a.id.localeCompare(b.id)).slice(0, 6).forEach((entity) => $('recent-panel').append(resultButton(entity)));
   if (!data.conversations.length) $('recent-panel').append(el('p', 'empty-search', '暂无已存储会话。'));
   setupEvents();
+  if (isReal()) {
+    indexControls = new IndexControls({button:$('analyze-new'),scope:$('analysis-scope'),status:$('analysis-status'),onUpdate:refreshGraph});
+    pollTimer = setInterval(() => { indexControls.refresh(); refreshGraph(); }, 4000);
+  }
   resizeObserver = new ResizeObserver(renderGraph);
   resizeObserver.observe($('graph-viewport'));
   renderGraph();
@@ -475,3 +481,56 @@ try {
 }
 }
 await initialize();
+
+function updateAnalysisScope() {
+  const conversation = data.conversations.find(item => item.id === state.conversationId);
+  indexControls?.select(conversation?.id || null, conversation?.title);
+}
+
+async function refreshGraph() {
+  if (!isReal() || refreshingGraph) return;
+  refreshingGraph = true;
+  try {
+    const next = await loadAtlas();
+    if (JSON.stringify(next) === JSON.stringify(data)) return;
+    const oldSelected = JSON.stringify(entityById(state.selectedId));
+    data = next;
+    // renderGraph reuses keyed node/edge DOM and the existing ParticleField, retaining expansion and scroll.
+    renderGraph();
+    updateAnalysisScope();
+    if (state.inspectorOpen && oldSelected !== JSON.stringify(entityById(state.selectedId))) {
+      const scroll = $('inspector').scrollTop; renderInspector(); $('inspector').scrollTop = scroll;
+    }
+    $('recent-panel').replaceChildren(el('h2', '', '最近入库会话 / SQLite'));
+    [...data.conversations].sort((a,b)=>(b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0,6).forEach(item=>$('recent-panel').append(resultButton(item)));
+    $('recent-count').textContent = String(data.conversations.length).padStart(2,'0');
+    const count = $('universe-stats').querySelectorAll('.stat strong');
+    if (count[0]) count[0].textContent = String(data.conversations.length).padStart(2,'0');
+    if (count[1]) count[1].textContent = String(data.quality?.messageCount || 0).padStart(2,'0');
+    if (count[2]) count[2].textContent = String(data.segments.length).padStart(2,'0');
+    $('source-label').textContent = data.segments.length ? 'SQLite · 语义索引' : 'SQLite · 已采集';
+    $('data-notice').textContent = `${data.conversations.length} 条持久化会话 · ${data.quality?.messageCount || 0} 条消息 · ${data.segments.length} 个语义主题 · 完整历史未知`;
+  } catch (error) { announce(`图谱更新暂未完成：${error.message}`); }
+  finally { refreshingGraph = false; }
+}
+
+function renderKeyAnswers(entity, panel) {
+  if (entity.sourceStatus !== 'ready') panel.append(el('p','prototype-note',indexReason(entity.sourceReason) || '该索引来源需要复核'));
+  const list = el('div','key-answer-list');
+  for (const [i,ref] of (entity.keyAssistantAnswers || []).entries()) {
+    const button = el('button','answer-reference');
+    button.append(el('strong','',`关键回答 ${i+1}`),el('small','',ref.reason));
+    button.addEventListener('click',async()=>{
+      button.disabled = true;
+      try {
+        const detail = await indexRequest(`/api/atlas/answer/${encodeURIComponent(entity.conversationId)}/${encodeURIComponent(entity.segmentId)}/${encodeURIComponent(ref.message_id)}`);
+        if (state.selectedId === entity.id) openAnswer(detail,entity.title);
+      } catch(error) { announce(error.message); button.append(el('small','',error.message)); }
+      finally {button.disabled=false;}
+    });
+    list.append(button);
+  }
+  if (!list.children.length) list.append(el('p','prototype-note','暂无可验证的关键回答引用。'));
+  const section = inspectorSection('重要模型回答 · 点击阅读原文',list);
+  panel.querySelector('.inspector-summary').before(section);
+}

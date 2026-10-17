@@ -3,12 +3,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 import logging
 import sqlite3
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from shared.conversation_store.store import list_stored_conversations, read_stored_conversation
+from .incremental_index import IncrementalIndex, IndexErrorState
+from .indexer import SemanticIndexer
+from .segment_api import segment_nodes, exact_answer
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 logger = logging.getLogger(__name__)
@@ -56,8 +60,16 @@ def conversation_node(row):
     }
 
 
-def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path | None = None) -> FastAPI:
-    app = FastAPI(title="Conversation Atlas · read-only Store integration")
+def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path | None = None,
+               provider_factory=None, budget=None) -> FastAPI:
+    index = IncrementalIndex(db_path, analysis_db_path)
+    indexer = SemanticIndexer(index, provider_factory, budget)
+    @asynccontextmanager
+    async def lifespan(app):
+        yield  # No migrations, model configuration or inference on startup.
+        indexer.close()
+    app = FastAPI(title="Conversation Atlas · read-only Store integration", lifespan=lifespan)
+    app.state.indexer = indexer
 
     @app.middleware("http")
     async def no_cached_history(request: Request, call_next):
@@ -69,13 +81,25 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
     async def database_unavailable(request: Request, error):
         # Log the exception type, never message bodies or raw SQL parameter values.
         logger.warning("Atlas Store unavailable: %s", type(error).__name__)
-        return JSONResponse(status_code=503, content={"detail": "无法读取已有会话库；请检查数据库文件、表结构或占用情况。Atlas 不会创建或迁移数据库。"})
+        return JSONResponse(status_code=503, content={"detail": "无法读取会话或索引库；请检查文件、表结构或占用情况。读取接口不会创建或迁移原文数据库。"})
 
     @app.get("/api/atlas")
     def graph():
         rows = list_stored_conversations(db_path)
         valid_rows = [row for row in rows if isinstance(row["conversation_id"], str) and row["conversation_id"].strip()]
         conversations = [conversation_node(row) for row in valid_rows]
+        segments = []
+        for node in conversations:
+            leaves = segment_nodes(index, node['id'])
+            check = index.inspect(node['id'])
+            node['indexState'] = check
+            node['segmentCount'] = len(leaves)
+            if leaves:
+                node['segmentStatus'] = 'indexed'
+                # A scoped AI display title, not the original ChatGPT title.
+                node.update(title=leaves[0]['title'], titleSource='first_segment_ai_title',
+                            summary=leaves[0]['summary'], summarySource='first_segment_summary')
+            segments.extend(leaves)
         count = sum(row["message_count"] for row in valid_rows)
         dates = [node["createdAt"] for node in conversations if node["createdAt"]]
         updates = [node["updatedAt"] for node in conversations if node["updatedAt"]]
@@ -89,8 +113,8 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
         }] if conversations else []
         return {
             "schemaVersion": 1,
-            "provenance": {"mode": "real", "label": "SQLite · 已采集数据", "description": "已存储的观察记录，完整性未知；没有 AI 分类、摘要或阶段结果。"},
-            "categories": categories, "conversations": conversations, "segments": [],
+            "provenance": {"mode": "real", "label": "SQLite · 持久化索引", "description": "已采集原文及已完成的主题索引；只有手动分析才调用模型。完整历史未知。"},
+            "categories": categories, "conversations": conversations, "segments": segments,
             "quality": {
                 "storedConversationCount": len(rows), "visibleConversationCount": len(conversations),
                 "skippedInvalidIdCount": len(rows) - len(valid_rows), "messageCount": count,
@@ -100,6 +124,26 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
                 "completeness": "unknown", "ordering": "not_evaluated",
             },
         }
+
+    @app.get('/api/atlas/index-state/{conversation_id}')
+    def index_state(conversation_id: str):
+        return {'conversationId': conversation_id, 'source': index.inspect(conversation_id),
+                'task': indexer.latest(conversation_id), 'budget': indexer.budget.__dict__}
+
+    @app.post('/api/atlas/index/{conversation_id}', status_code=202)
+    def manual_index(conversation_id: str, request: Request):
+        # Cross-origin pages cannot spend API budget via a form or simple request.
+        origin = request.headers.get('origin')
+        if request.headers.get('x-atlas-action') != 'manual-analysis' or (origin and origin != str(request.base_url).rstrip('/')):
+            raise HTTPException(403, '仅接受 Atlas 页面明确发起的手动分析。')
+        try:
+            return indexer.start(conversation_id)
+        except IndexErrorState as error:
+            raise HTTPException(409, detail={'code': str(error)}) from error
+
+    @app.get('/api/atlas/answer/{conversation_id}/{segment_id}/{message_key}')
+    def answer(conversation_id: str, segment_id: str, message_key: str):
+        return exact_answer(index, conversation_id, segment_id, message_key)
 
     @app.get('/api/atlas/analysis/{conversation_id:path}')
     def completed_analysis(conversation_id: str):
