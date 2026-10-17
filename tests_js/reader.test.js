@@ -9,7 +9,7 @@ const source = fs.readFileSync(
     'utf8'
 );
 
-function makeReader(initialRoute, nodes) {
+function makeReader(initialRoute, nodes, readingCapture) {
     const sent = [];
     const timeouts = new Map();
     let nextTimeout = 1;
@@ -25,7 +25,7 @@ function makeReader(initialRoute, nodes) {
             let n=0;for(const char of key)n=(n*31+char.charCodeAt(0))>>>0;
             const id=`00000000-0000-4000-8000-${n.toString(16).padStart(12,'0')}`;
             return {getAttribute(name){return name==='data-content-search-unit-key'?key:null;},innerText:content,
-                closest(selector){return {getAttribute(name){return name==='data-chatgpt-search-message-ids'?id:name==='data-talvt-turn-state'?'complete':null;}};}};
+                closest(selector){return {owner:true,querySelectorAll(){return [{}];},getAttribute(name){return name==='data-chatgpt-search-message-ids'?id:name==='data-talvt-turn-state'?'complete':null;}};}};
         });
     }
     const chrome = {
@@ -38,6 +38,7 @@ function makeReader(initialRoute, nodes) {
         },
     };
     const context = {
+        ...(readingCapture ? {AtlasReadingCapture:readingCapture} : {}),
         console: {log() {}, warn() {}},
         location: page.location,
         URL,
@@ -174,4 +175,25 @@ test('extension manifest has required MV3 permissions and localhost host access'
     assert.ok(manifest.permissions.includes('tabs'));
     assert.ok(manifest.permissions.includes('storage'));
     assert.ok(manifest.host_permissions.includes('http://127.0.0.1:18000/*'));
+});
+
+test('presentation changes resend the same body without weakening shorter-text preservation', async()=>{
+    let tag='p';
+    const r=makeReader('/c/A',[{key:'native:assistant',content:'完整模型回答'}],{
+        documentFor:()=>({version:1,nodes:[{tag,text:'完整模型回答'}]}),hasImage:()=>false,
+    });
+    assert.equal(r.sent[0].messages[0].presentation.nodes[0].tag,'p');
+    tag='strong';await r.mutation();
+    assert.equal(r.sent[1].messages[0].presentation.nodes[0].tag,'strong');
+    assert.equal(r.sent[1].messages[0].content,r.sent[0].messages[0].content);
+    r.page.nodes[0].content='短';tag='h2';await r.mutation();
+    assert.equal(r.sent.length,2);
+});
+
+test('reading attachments use only the native owner containing exactly one text unit',()=>{
+    const r=makeReader('/c/A',[{key:'native:user',content:'带图片的提问'}],{
+        documentFor:node=>({version:1,nodes:[{tag:node.owner?'img':'p',src:null,alt:'用户附件'}]}),hasImage:()=>true,
+    });
+    assert.equal(r.sent[0].messages[0].presentation.nodes[0].tag,'img');
+    assert.equal(r.sent[0].messages[0].content,'带图片的提问');
 });

@@ -79,16 +79,20 @@ function readVisibleMessages(root) {
         }
 
         let content = element.innerText.trim();
+        // Some attachments sit beside the text unit, inside its same native-ID owner.
+        // Expand only a single-unit owner; never borrow media from adjacent messages.
+        const readingRoot = source?.querySelectorAll?.('[data-content-search-unit-key]').length === 1 ? source : element;
+        const presentation = typeof AtlasReadingCapture === 'undefined' ? null : AtlasReadingCapture.documentFor(readingRoot);
         if (role === "assistant") {
             content = content.replace(/^ChatGPT 说：\s*/, "");
             const state = element.closest('[data-talvt-turn-state]')?.getAttribute('data-talvt-turn-state');
-            if (state !== 'complete' || !content.trim()) {
+            if (state !== 'complete' || (!content.trim() && !(presentation && AtlasReadingCapture.hasImage(presentation.nodes)))) {
                 pendingAssistants++;
                 continue; // Re-observe this native ID; publish only a completed body.
             }
         }
         const key = `chatgpt:${ids[0].toLowerCase()}:${role}`;
-        messages.push({ key, role, content });
+        messages.push({ key, role, content, ...(presentation ? {presentation} : {}) });
     }
     return { messages, pendingAssistants, unresolvedMessages };
 }
@@ -142,6 +146,10 @@ function syncConversationCache() {
         if (!previous) {
             cache.set(message.key, message);
             changed = true;
+        } else if (message.content === previous.content && message.presentation &&
+                   JSON.stringify(message.presentation) !== JSON.stringify(previous.presentation)) {
+            cache.set(message.key, message);
+            changed = true; // Presentation-only change is not a semantic save event.
         } else if (message.content.length > previous.content.length) {
             // Diagnostic only: ChatGPT fallback DOM keys aren't guaranteed
             // permanent; do not pretend this heuristic fixes all collisions.
@@ -165,6 +173,7 @@ function syncConversationCache() {
         key: message.key,
         role: message.role,
         content: message.content,
+        ...(message.presentation ? {presentation:message.presentation} : {}),
     }));
 
     // Never put original chat contents in the console log.
@@ -226,7 +235,7 @@ observer.observe(document.documentElement, {
     subtree: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ['data-app-shell-active-page', 'data-chatgpt-search-message-ids', 'data-talvt-turn-state'],
+    attributeFilter: ['data-app-shell-active-page', 'data-chatgpt-search-message-ids', 'data-talvt-turn-state', 'src', 'href', 'alt'],
 });
 routeTimer = setInterval(() => {
     // Also recovers an observation if a framework replaces a container without

@@ -1,5 +1,6 @@
 from typing import Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
+from shared.conversation_store.presentation import validate_presentation
 
 
 class Message(BaseModel):
@@ -20,6 +21,12 @@ class ContextHealth(BaseModel):
 class BridgeMessage(Message):
     key: str = Field(min_length=1, max_length=1024)
     source_created_at: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    presentation: dict | None = None
+
+    @field_validator('presentation')
+    @classmethod
+    def check_presentation(cls, value):
+        return validate_presentation(value)
 
 
 class ConversationSyncRequest(BaseModel):

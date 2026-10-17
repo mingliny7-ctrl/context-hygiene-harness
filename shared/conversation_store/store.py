@@ -7,6 +7,7 @@ from shared.conversation_store.database import get_connection
 from shared.conversation_store.database import get_read_connection
 from shared.conversation_store.identity import is_temporary_conversation_id
 from shared.conversation_store.message_order import save_order_evidence, order_messages
+from shared.conversation_store.presentation import save_presentation, body_digest
 
 
 def saved_assistant_count(messages: list[dict]) -> tuple[int | None, str, int]:
@@ -110,6 +111,7 @@ def save_observation(
                 message["role"],
                 message["content"],
             )
+            save_presentation(connection, conversation_id, message)
         save_order_evidence(connection, conversation_id, messages, observed_order)
         connection.commit()
     except Exception:
@@ -206,7 +208,19 @@ def read_stored_conversation(conversation_id: str, db_path: str | Path | None = 
         # Atlas also supports older stores without migrating them on read.
         table = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_order_evidence'").fetchone()
         evidence = connection.execute('SELECT evidence FROM conversation_order_evidence WHERE conversation_id=?', (conversation_id,)).fetchone() if table else None
-        ordered, ordering = order_messages([dict(row) for row in messages], json.loads(evidence[0]) if evidence else None)
+        available = connection.execute("SELECT 1 FROM sqlite_master WHERE name='message_presentations'").fetchone()
+        presentations = {row['message_key']: dict(row) for row in connection.execute('SELECT * FROM message_presentations WHERE conversation_id=?', (conversation_id,))} if available else {}
+        material = []
+        for row in messages:
+            item = dict(row)
+            saved = presentations.get(item['key'])
+            matches = saved and saved['body_digest'] == body_digest(item['content'])
+            item.update(presentation=json.loads(saved['payload_json']) if matches else None,
+                        observed_presentation=json.loads(saved['payload_json']) if saved and not matches else None,
+                        presentation_status='captured_dom' if matches else 'source_mismatch' if saved else 'text_only',
+                        presentation_captured_at=saved['captured_at'] if saved else None)
+            material.append(item)
+        ordered, ordering = order_messages(material, json.loads(evidence[0]) if evidence else None)
         return {**dict(conversation), "messages": ordered, "ordering": ordering}
     finally:
         connection.close()

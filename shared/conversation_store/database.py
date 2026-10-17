@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+import uuid
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +33,12 @@ def get_read_connection(db_path: str | Path | None = None) -> sqlite3.Connection
 def init_db(db_path: str | Path | None = None) -> None:
     connection = get_connection(db_path)
     try:
+        if (connection.execute("SELECT 1 FROM sqlite_master WHERE name='messages'").fetchone()
+                and not connection.execute("SELECT 1 FROM sqlite_master WHERE name='message_presentations'").fetchone()):
+            path = Path(db_path) if db_path is not None else DB_PATH
+            backup = path.with_name(path.stem + '.reading-backup-' + uuid.uuid4().hex + '.db')
+            with sqlite3.connect(backup) as destination:
+                connection.backup(destination)
         # WAL helps concurrent reads while a sync transaction is writing.
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("""
@@ -71,6 +78,11 @@ def init_db(db_path: str | Path | None = None) -> None:
             conversation_id TEXT PRIMARY KEY REFERENCES conversations(conversation_id) ON DELETE CASCADE,
             evidence TEXT NOT NULL
         )''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS message_presentations (
+            conversation_id TEXT NOT NULL, message_key TEXT NOT NULL,
+            body_digest TEXT NOT NULL, payload_json TEXT NOT NULL, captured_at TEXT NOT NULL,
+            PRIMARY KEY(conversation_id,message_key),
+            FOREIGN KEY(conversation_id,message_key) REFERENCES messages(conversation_id,message_key) ON DELETE CASCADE)''')
         connection.commit()
     finally:
         connection.close()

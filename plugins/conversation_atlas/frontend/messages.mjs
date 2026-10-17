@@ -1,3 +1,4 @@
+import { renderReading } from './reading.mjs';
 /** Verbatim Store viewer. Unconnected order groups never imply chronology. */
 const make = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -5,6 +6,20 @@ const make = (tag, className, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
+
+function messageUnit(message, position='') {
+  const article=make('article',`raw-message role-${message.role}`);
+  article.dataset.messageKey=message.key;article.dataset.role=message.role;
+  const header=make('header');
+  header.append(make('strong','',{user:'你',assistant:'Assistant'}[message.role]||message.role));
+  const original=message.sourceCreatedAt ?? message.source_created_at;
+  const collected=message.firstSeenAt ?? message.first_seen_at;
+  let time=typeof original==='number' && Number.isFinite(original) ? `原始发送时间：${new Date(original*1000).toLocaleString('zh-CN')}` : '原始发送时间未知';
+  if(collected){const stamp=/[zZ]|[+-]\d\d:\d\d$/.test(collected)?collected:collected.replace(' ','T')+'Z';const date=new Date(stamp);if(Number.isFinite(date.getTime()))time+=` · 采集于 ${date.toLocaleString('zh-CN')}`;}
+  header.append(make('small','message-time',time));article.append(header);
+  if(position)article.append(make('small','message-position',position));
+  article.append(renderReading(message));return article;
+}
 
 export function openMessages(detail, title, messageKey = null) {
   let dialog = document.getElementById('raw-dialog');
@@ -40,15 +55,9 @@ export function openMessages(detail, title, messageKey = null) {
     const option = make('option', '', `${String(index + 1).padStart(2, '0')} · ${role}`);
     option.value = message.key;
     jump.append(option);
-    const article = make('article', 'raw-message');
-    article.dataset.messageKey = message.key;
-    article.id = `raw-message-${encodeURIComponent(message.key)}`;
-    const meta = make('header');
-    const position = message.sourceOrder != null ? `对话顺序 ${message.sourceOrder + 1}`
-      : message.relativeOrder != null ? `相对组 ${message.orderGroup + 1} / ${message.relativeOrder + 1} · 组间顺序未知`
-      : '历史顺序未确认';
-    meta.append(make('strong', '', `${position} · ${role}`));
-    article.append(meta, make('pre', '', message.content.trim() ? message.content : '〔Store 中正文为空，无法补全未采集内容〕'));
+    const position = message.sourceOrder != null ? `第 ${message.sourceOrder + 1} 条消息`
+      : message.relativeOrder != null ? '已确认组内顺序 · 组间顺序未知' : '历史顺序未确认';
+    const article=messageUnit(message,position);
     list.append(article);
   });
   jump.addEventListener('change', () => jumpTo(jump.value));
@@ -71,16 +80,7 @@ export function openAnswer(detail, title) {
   if(detail.contextStatus!=='ordered_adjacent') dialog.append(make('p','prototype-note','暂无法可靠关联用户提问，以下展示对应模型原文。'));
   const list=make('div','raw-message-list');
   for (const message of [...detail.questions,detail.answer]) {
-    const article=make('article','raw-message'); article.dataset.messageKey=message.key;
-    article.append(make('h3','',message.role==='user' ? '用户提问' : '模型回答全文'));
-    article.append(make('small','',message.source_created_at != null ? `原始创建时间：${new Date(message.source_created_at*1000).toLocaleString('zh-CN')}` : '原始发送时间未采集'));
-    const body=make('div','raw-prose');
-    const parts=message.content.split(/(```[^\n]*\n[\s\S]*?(?:```|$))/g);
-    for(const part of parts) {
-      if(part.startsWith('```')) {const pre=make('pre');pre.append(make('code','',part.replace(/^```[^\n]*\n/,'').replace(/```$/,'')));body.append(pre);}
-      else body.append(make('div','',part));
-    }
-    article.append(body); list.append(article);
+    list.append(messageUnit(message));
   }
   dialog.append(list); dialog.showModal(); list.scrollTop=0;
 }

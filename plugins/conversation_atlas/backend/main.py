@@ -176,6 +176,8 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
             "key": item["key"], "role": item["role"], "content": item["content"],
             "firstSeenAt": stored_time(item["first_seen_at"]), "updatedAt": stored_time(item["updated_at"]),
             "sourceCreatedAt": item['source_created_at'], "sourceOrder": item['source_order'],
+            "presentation": item['presentation'], "presentationStatus": item['presentation_status'],
+            "observedPresentation": item['observed_presentation'],
             "orderGroup": item['order_group'], "relativeOrder": item['relative_order'], "orderStatus": item['order_status'],
         } for item in stored["messages"]]
         return {

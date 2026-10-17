@@ -63,7 +63,8 @@ def exact_answer(index, cid, sid, key):
     scope = {m['key']: m for m in members if m['segment_id'] == sid}
     if any(m['key'] not in scope or fingerprint(m)['body_digest'] != scope[m['key']]['body_digest'] for m in users):
         users = []
-    pack = lambda m: {k: m[k] for k in ('key', 'role', 'content', 'source_order', 'source_created_at')}
+    pack = lambda m: {k: m[k] for k in ('key', 'role', 'content', 'source_order', 'source_created_at',
+                                      'first_seen_at', 'presentation', 'presentation_status', 'observed_presentation')}
     return {'conversationId': cid, 'segmentId': sid, 'answer': pack(answer),
             'questions': [pack(m) for m in users], 'contextStatus': 'ordered_adjacent' if users else 'unconfirmed',
             'ordering': stored['ordering'], 'note': '相邻用户提问按已确认页面顺序关联，未验证 ChatGPT 分支父子关系。'}
