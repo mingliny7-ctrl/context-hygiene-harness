@@ -109,7 +109,7 @@ export class ParticleField {
     this.lastTime = null;
     this.time = 0;
     this.coreSphere = createSphere(610, 31416);
-    this.satelliteSphere = createSphere(140, 27182);
+    this.satelliteSphere = createSphere(210, 27182);
     this.motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     this.reducedMotion = this.motionQuery.matches;
     const next = random(16180);
@@ -137,7 +137,7 @@ export class ParticleField {
     this.resize();
   }
 
-  setCore({ x, y, radius = 78, opacity = 1 }) {
+  setCore({ x, y, radius = 78, opacity = 1, homeSky = false }) {
     if (this.destroyed) return;
     const target = {
       x: finite(x, this.width / 2), y: finite(y, this.height / 2),
@@ -145,6 +145,7 @@ export class ParticleField {
     };
     if (!this.core) this.core = { ...target, target };
     else this.core.target = target;
+    this.core.homeSky = Boolean(homeSky);
     this.syncAnimation();
   }
 
@@ -168,6 +169,7 @@ export class ParticleField {
         current.color = colorChannels(satellite.color);
         current.exiting = false;
       }
+      current.corona = Boolean(satellite.corona);
     });
     this.satellites.forEach((satellite, id) => {
       if (!activeIds.has(id)) {
@@ -264,6 +266,7 @@ export class ParticleField {
     if (node.opacity < 0.002 || node.radius < 0.5) return;
     const ctx = this.context;
     const opacity = node.opacity;
+    if (node.homeSky || node.corona) this.drawCorona(node, color, isCore);
     const filamentColor = isCore ? color : color.map((channel, index) => Math.round(channel * 0.3 + WHITE[index] * 0.7));
     const angle = this.time * (isCore ? 0.085 : 0.055) + (isCore ? 0 : node.x * 0.003);
     const tilt = 0.24 + Math.sin(this.time * 0.065) * 0.11;
@@ -300,7 +303,7 @@ export class ParticleField {
       const a = sphere.projected[first];
       const b = sphere.projected[second];
       const depth = (a.z + b.z + 2) / 4;
-      ctx.strokeStyle = rgba(filamentColor, (isCore ? 0.065 + depth * 0.19 : 0.12 + depth * 0.29) * opacity);
+      ctx.strokeStyle = rgba(filamentColor, (isCore ? (node.homeSky ? 0.10 + depth * 0.25 : 0.065 + depth * 0.19) : 0.12 + depth * 0.29) * opacity);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
@@ -361,6 +364,34 @@ export class ParticleField {
           ctx.fill();
         }
       });
+    }
+  }
+
+  drawCorona(node, color, isCore) {
+    // Bounded, deterministic filaments in the existing RAF, not a new physics simulation.
+    const ctx = this.context;
+    const count = isCore ? 110 : 24;
+    const glow = ctx.createRadialGradient(node.x, node.y, node.radius * .5, node.x, node.y, node.radius * 2.1);
+    glow.addColorStop(0, rgba(color, .075 * node.opacity));
+    glow.addColorStop(.4, rgba(color, .035 * node.opacity));
+    glow.addColorStop(1, rgba(color, 0));
+    ctx.fillStyle = glow;
+    ctx.fillRect(node.x - node.radius * 2.1, node.y - node.radius * 2.1, node.radius * 4.2, node.radius * 4.2);
+    for (let i = 0; i < count; i += 1) {
+      const angle = i * GOLDEN_ANGLE + this.time * .018;
+      const spread = 1.07 + (Math.sin(i * 12.73) + 1) * (isCore ? .52 : .28);
+      const x = node.x + Math.cos(angle) * node.radius * spread;
+      const y = node.y + Math.sin(angle) * node.radius * spread * .78;
+      const shimmer = .65 + Math.sin(this.time * .45 + i) * .15;
+      ctx.fillStyle = rgba(color, (.16 + (i % 7) * .045) * node.opacity * shimmer);
+      ctx.beginPath(); ctx.arc(x, y, i % 9 === 0 ? 1.35 : .65, 0, TAU); ctx.fill();
+      if (i % 3 === 0) {
+        ctx.strokeStyle = rgba(color, .11 * node.opacity);
+        ctx.lineWidth = .45;
+        ctx.beginPath();
+        ctx.moveTo(node.x + Math.cos(angle - .13) * node.radius * .92, node.y + Math.sin(angle - .13) * node.radius * .92);
+        ctx.lineTo(x,y);ctx.stroke();
+      }
     }
   }
 

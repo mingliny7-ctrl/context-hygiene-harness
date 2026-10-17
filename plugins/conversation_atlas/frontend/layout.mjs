@@ -67,17 +67,19 @@ export function recentConversations(conversations) {
 }
 
 function overview(conversations, width, height) {
-  const core = { x: width / 2, y: height * .43, radius: Math.min(80, width * .11), opacity: 1 };
+  const core = { x: width / 2, y: height * .43, radius: Math.min(92, width * .11), opacity: 1, homeSky: true };
   const recent = recentConversations(conversations);
   const w = Math.min(168, width * .25);
   // Stable asymmetric pockets; layout never jitters on refresh or depends on title length.
-  const pockets = [[-.29,-.30],[.28,-.24],[-.40,.03],[.39,.10],[-.24,.36],[.25,.39]];
+  const pockets = [[-.32,-.22],[.16,-.32],[.37,-.08],[-.39,.20],[.30,.32],[-.18,.37]];
+  const radii = [30,23,34,24,27,21];
+  const colors = ['#aeb4e2','#d7d2bb','#a7d8cf','#b5c8e8','#dec695','#bfcfbc'];
   const nodes = recent.map((entity, i) => {
     const [px, py] = pockets[i];
     const x = Math.max(w / 2 + 16, Math.min(width - w / 2 - 16, core.x + px * width));
     const y = Math.max(56, Math.min(height - 54, core.y + py * height));
     return node('conversation', entity, x, y, CORE_ID,
-      { width: w, height: 100, radius: 24, planet: true, orbOffsetY: -18 });
+      { width: w, height: 100, radius: radii[i], planet: true, orbOffsetY: -18, skyColor: colors[i] });
   });
   return { core, nodes, edges: edgesFor(core, nodes), width, height, requiredHeight: height };
 }

@@ -59,17 +59,17 @@
   backdrop-filter:none;box-shadow:none;text-align:center;
 }
 .overview-conversation .node-spark {
-  position:absolute;left:50%;top:32px;width:48px;height:48px;
+  position:absolute;left:50%;top:32px;width:var(--planet-size,48px);height:var(--planet-size,48px);
   transform:translate(-50%,-50%);background:transparent;
-  border:1px solid color-mix(in srgb,var(--node-color) 14%,transparent);
+  border:0;
   box-shadow:0 0 18px 4px color-mix(in srgb,var(--node-color) 8%,transparent),inset 0 0 16px #c9e0d408;
   animation:planet-breathe 7s ease-in-out infinite;animation-delay:var(--planet-delay);
   transition:box-shadow .35s,border-color .35s;
 }
 .overview-conversation .node-copy {
-  position:absolute;top:65px;left:50%;transform:translateX(-50%);
+  position:absolute;top:var(--planet-label-top,65px);left:50%;transform:translateX(-50%);
   max-width:100%;padding:4px 8px;border:1px solid #c5d4bb12;border-radius:5px;
-  background:#10171155;color:#a9b6aa;transition:color .3s,border-color .3s,background .3s;
+  background:#10171155;color:#bdc7bd;transition:color .3s,border-color .3s,background .3s;
 }
 .overview-conversation .node-title {font-size:11px;font-weight:400;letter-spacing:.25px}
 .overview-conversation .node-chevron,.overview-conversation .node-meta {display:none}
@@ -82,13 +82,17 @@
 .overview-conversation:active .node-spark {box-shadow:0 0 32px 10px #d9e8c735}
 .overview-conversation:focus-visible {outline:1px solid #bdcfa73b;outline-offset:4px;border-radius:12px}
 .connection.gravity-line {
-  stroke:#afcbb9;stroke-width:.7;stroke-linecap:round;stroke-opacity:.16;
+  stroke:var(--gravity-color,#afcbb9);stroke-width:.7;stroke-linecap:round;stroke-opacity:.25;
   animation:gravity-breathe 9s ease-in-out infinite;animation-delay:var(--line-delay);
 }
-.connection.gravity-line.hovered {animation:none;stroke-opacity:.42;stroke-width:1}
+.connection.gravity-line.hovered {animation:none;stroke-opacity:.58;stroke-width:1}
+.gravity-flow {fill:none;pointer-events:none;stroke:var(--gravity-color,#afcbb9);stroke-width:1.7;stroke-linecap:round;stroke-dasharray:1 185;opacity:.55;filter:drop-shadow(0 0 3px var(--gravity-color,#afcbb9));transition:d 720ms var(--ease);animation:gravity-travel 12s linear infinite;animation-delay:var(--line-delay)}
+@keyframes gravity-travel {to {stroke-dashoffset:-372}}
 @keyframes planet-breathe {50% {opacity:.6;box-shadow:0 0 23px 6px #b5d2b918}}
-@keyframes gravity-breathe {50% {stroke-opacity:.075}}
-.motion-paused .gravity-line,.motion-paused .overview-conversation .node-spark {animation-play-state:paused}
+@keyframes gravity-breathe {50% {stroke-opacity:.14}}
+.atlas-app:not(.expanded) .core-label {text-shadow:0 1px 12px #000,0 1px 3px #000}
+.motion-paused .gravity-line,.motion-paused .gravity-flow,.motion-paused .overview-conversation .node-spark {animation-play-state:paused}
 @media(prefers-reduced-motion:reduce) {
   .connection.gravity-line,.overview-conversation .node-spark {animation:none}
+  .gravity-flow {display:none!important;animation:none}
 }

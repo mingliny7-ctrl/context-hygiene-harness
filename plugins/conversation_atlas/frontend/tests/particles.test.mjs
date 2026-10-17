@@ -96,6 +96,21 @@ test('canvas uses CSS dimensions, caps DPR, and redraws after ResizeObserver cha
   assert.ok(drawing.clearCount > before, 'paused canvases must redraw at their new size');
 });
 
+test('home corona shares the original renderer and disappears for the focused core', (t) => {
+  const {field,frames,drawing}=setup(t);
+  field.setPaused(true);
+  field.setCore({x:450,y:310,homeSky:true});
+  let before=drawing.pointCount;
+  field.render();
+  const withCorona=drawing.pointCount-before;
+  field.setCore({x:450,y:310,homeSky:false});
+  before=drawing.pointCount;
+  field.render();
+  assert.ok(withCorona>drawing.pointCount-before);
+  assert.equal(field.core.homeSky,false);
+  assert.equal(frames.size,0,'home decoration must not bypass explicit pause');
+});
+
 test('pause cancels RAF and resume or data updates never queue duplicate loops', (t) => {
   const { field, frames, advance } = setup(t);
   assert.equal(frames.size, 1);
