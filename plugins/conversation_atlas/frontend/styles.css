@@ -51,3 +51,44 @@
 @media(min-width:761px) and (max-width:1179px){.inspector{position:relative;inset:auto;flex-basis:330px;width:330px}.graph-viewport.has-inspector{padding-right:0}}
 @media(max-width:1000px){.core-label small,.core-eyebrow{display:none}.core-label strong{font-size:18px}}
 @media(max-width:760px){.inspector{width:calc(100% - 24px);max-height:55vh;top:auto;bottom:195px}.raw-prose,.raw-message pre{font-size:14px}}
+
+/* Home sky only: the existing canvas supplies the same particle shells as the core. */
+.graph-node.overview-conversation,
+.graph-node.overview-conversation:hover {
+  display:block;padding:0;border:0;border-radius:0;background:transparent;
+  backdrop-filter:none;box-shadow:none;text-align:center;
+}
+.overview-conversation .node-spark {
+  position:absolute;left:50%;top:32px;width:48px;height:48px;
+  transform:translate(-50%,-50%);background:transparent;
+  border:1px solid color-mix(in srgb,var(--node-color) 14%,transparent);
+  box-shadow:0 0 18px 4px color-mix(in srgb,var(--node-color) 8%,transparent),inset 0 0 16px #c9e0d408;
+  animation:planet-breathe 7s ease-in-out infinite;animation-delay:var(--planet-delay);
+  transition:box-shadow .35s,border-color .35s;
+}
+.overview-conversation .node-copy {
+  position:absolute;top:65px;left:50%;transform:translateX(-50%);
+  max-width:100%;padding:4px 8px;border:1px solid #c5d4bb12;border-radius:5px;
+  background:#10171155;color:#a9b6aa;transition:color .3s,border-color .3s,background .3s;
+}
+.overview-conversation .node-title {font-size:11px;font-weight:400;letter-spacing:.25px}
+.overview-conversation .node-chevron,.overview-conversation .node-meta {display:none}
+.overview-conversation:hover .node-spark,.overview-conversation:focus-visible .node-spark {
+  border-color:#cde5c94d;box-shadow:0 0 27px 7px #bedbc51c,inset 0 0 16px #d3e5c812;
+}
+.overview-conversation:hover .node-copy,.overview-conversation:focus-visible .node-copy {
+  color:#e0e8d6;border-color:#c5d4bb36;background:#17231c99;
+}
+.overview-conversation:active .node-spark {box-shadow:0 0 32px 10px #d9e8c735}
+.overview-conversation:focus-visible {outline:1px solid #bdcfa73b;outline-offset:4px;border-radius:12px}
+.connection.gravity-line {
+  stroke:#afcbb9;stroke-width:.7;stroke-linecap:round;stroke-opacity:.16;
+  animation:gravity-breathe 9s ease-in-out infinite;animation-delay:var(--line-delay);
+}
+.connection.gravity-line.hovered {animation:none;stroke-opacity:.42;stroke-width:1}
+@keyframes planet-breathe {50% {opacity:.6;box-shadow:0 0 23px 6px #b5d2b918}}
+@keyframes gravity-breathe {50% {stroke-opacity:.075}}
+.motion-paused .gravity-line,.motion-paused .overview-conversation .node-spark {animation-play-state:paused}
+@media(prefers-reduced-motion:reduce) {
+  .connection.gravity-line,.overview-conversation .node-spark {animation:none}
+}

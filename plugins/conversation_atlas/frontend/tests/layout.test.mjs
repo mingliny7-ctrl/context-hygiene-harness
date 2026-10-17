@@ -42,3 +42,21 @@ test('bezier keeps one finite morphable cubic including collapsed endpoints',()=
   assert.equal(bezierPath({x:0,y:0,radius:20,kind:'core'},{x:100,y:0,width:40,height:40}),'M 20 0 C 50 0, 50 0, 80 0');
   assert.doesNotMatch(bezierPath({x:0,y:0},{x:0,y:0}),/NaN|Infinity/);
 });
+
+test('home planets include separate label bounds, stable asymmetric pockets and curved gravity edges',()=>{
+  for(const width of [948,1100,1500]) for(const height of [350,500,720]) {
+    const sky=computeLayout(data,{}, {width,height});
+    assert.equal(sky.nodes.length,6);
+    for(const n of sky.nodes) {
+      assert.equal(n.planet,true);assert.equal(n.orbOffsetY,-18);
+      assert.ok(n.x-n.width/2>=0 && n.x+n.width/2<=width);
+      assert.ok(n.y-n.height/2>=0 && n.y+n.height/2<=height);
+      for(const other of sky.nodes) if(n!==other)
+        assert.ok(Math.abs(n.x-other.x)> (n.width+other.width)/2 || Math.abs(n.y-other.y)> (n.height+other.height)/2);
+    }
+    assert.ok(sky.edges.every(e=>! /NaN|Infinity/.test(e.path) && e.path.includes(' C ')));
+    assert.deepEqual(computeLayout(data,{}, {width,height}),sky);
+    const focused=computeLayout(data,{conversationId:'c19'},{width,height});
+    assert.equal(focused.nodes[0].planet,undefined);
+  }
+});

@@ -107,6 +107,16 @@ function createNode(item) {
   const copy = el('span', 'node-copy');
   copy.append(el('span', 'node-title'), el('span', 'node-meta'));
   button.append(copy, Object.assign(icon('chevron-right'), { className: 'node-chevron' }));
+  const highlight = active => {
+    if (!button.classList.contains('overview-conversation')) return;
+    for (const [id, path] of edgeElements) {
+      if (id === `edge:atlas-core:${item.id}`) path.classList.toggle('hovered', active);
+    }
+  };
+  button.addEventListener('pointerenter', () => highlight(true));
+  button.addEventListener('pointerleave', () => highlight(false));
+  button.addEventListener('focus', () => highlight(true));
+  button.addEventListener('blur', () => highlight(false));
   button.addEventListener('click', () => choose(entityById(item.id)));
   return button;
 }
@@ -152,7 +162,7 @@ function renderGraph() {
   $('connections').setAttribute('viewBox', `0 0 ${layout.width} ${Math.max(height, layout.requiredHeight || layout.height)}`);
   const nextNodes = new Map(layout.nodes.map((item) => [item.id, item]));
   field.setCore(layout.core);
-  field.setSatellites(layout.nodes.filter((item) => item.kind === 'category').map((item) => ({ id: item.id, x: item.x, y: item.y - 22, radius: expanded ? 22 : 28, color: item.entity.color, opacity: 0.9 })));
+  field.setSatellites(layout.nodes.filter((item) => item.kind === 'category' || item.planet).map((item) => ({ id: item.id, x: item.x, y: item.y + (item.orbOffsetY ?? -22), radius: item.planet ? item.radius : expanded ? 22 : 28, color: categoryFor(item.entity)?.color || '#a9c4b5', opacity: 0.9 })));
   $('core-label').style.left = `${layout.core.x}px`;
   $('core-label').style.top = `${layout.core.y + layout.core.radius + 24}px`;
 
@@ -176,6 +186,7 @@ function renderGraph() {
     button.style.width = `${item.width}px`;
     button.style.height = `${item.height}px`;
     button.style.setProperty('--node-color', categoryFor(item.entity)?.color || '#d0d4ab');
+    button.style.setProperty('--planet-delay', `${-layout.nodes.indexOf(item) * 1.3}s`);
     button.querySelector('.node-title').textContent = item.entity.title;
     button.querySelector('.node-meta').textContent = item.kind === 'category' ? `${data.conversations.filter((entry) => entry.categoryId === item.id).length} 段对话 · 点击探索` : item.kind === 'conversation' && isReal() ? `${item.entity.messageCount} 条消息 · ${item.entity.segmentCount || 0} 个主题 · ${item.entity.indexState?.status === 'ready' ? (item.entity.indexState.appended.length ? '有新增' : '已索引') : '来源待确认'}` : item.kind === 'conversation' ? `${formatDate(item.entity.updatedAt)} · ${item.entity.segmentCount} 个讨论阶段` : `阶段 ${String(item.entity.order).padStart(2, '0')} · ${item.entity.messageCount} 条消息`;
     button.setAttribute('aria-label', `${typeName[item.kind]}：${item.entity.title}`);
@@ -223,7 +234,8 @@ function renderGraph() {
       path.getBoundingClientRect();
     }
     path.classList.toggle('exiting', false);
-    path.setAttribute('class', `connection${edge.to === state.selectedId || edge.from === state.selectedId ? ' highlighted' : ''}`);
+    path.setAttribute('class', `connection${!expanded ? ' gravity-line' : ''}${edge.to === state.selectedId || edge.from === state.selectedId ? ' highlighted' : ''}`);
+    path.style.setProperty('--line-delay', `${-layout.edges.indexOf(edge) * 1.7}s`);
     path.style.d = `path("${edge.path}")`;
     path.style.opacity = '1';
     // Attribute remains readable for diagnostic tools and non-CSS-d SVG support.
@@ -414,6 +426,7 @@ function setupEvents() {
   $('guide-dialog').addEventListener('click', (event) => { if (event.target === $('guide-dialog')) { const rect = event.target.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) event.target.close(); } });
   $('motion-toggle').addEventListener('click', () => {
     paused = !paused;
+    $('atlas-app').classList.toggle('motion-paused', paused);
     field.setPaused(paused);
     $('motion-toggle').setAttribute('aria-pressed', String(paused));
     $('motion-toggle').querySelector('img').src = `icons/${paused ? 'play' : 'pause'}.svg`;

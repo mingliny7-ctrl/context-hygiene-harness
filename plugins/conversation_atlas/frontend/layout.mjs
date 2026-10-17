@@ -33,6 +33,17 @@ function boundary(source, target) {
 
 /** One cubic segment in every state, so SVG path strings can morph continuously. */
 export function bezierPath(source, target) {
+  if (source.planet || target.planet) {
+    const center = n => ({ ...n, y: n.y + (n.orbOffsetY || 0), kind: 'core', radius: (n.radius || 0) + 8 });
+    const start = boundary(center(source), center(target));
+    const end = boundary(center(target), center(source));
+    const dx = end.x - start.x, dy = end.y - start.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const seed = [...String(target.id || '')].reduce((sum, c) => sum + c.charCodeAt(0), 0);
+    const bend = (seed % 2 ? 1 : -1) * (18 + seed % 29);
+    const number = v => Math.round(v * 100) / 100;
+    return `M ${number(start.x)} ${number(start.y)} C ${number(start.x + dx * .28 - dy / length * bend)} ${number(start.y + dy * .28 + dx / length * bend)}, ${number(end.x - dx * .24 - dy / length * bend * .55)} ${number(end.y - dy * .24 + dx / length * bend * .55)}, ${number(end.x)} ${number(end.y)}`;
+  }
   const start = boundary(source, target);
   const end = boundary(target, source);
   const bend = (end.x - start.x) * 0.5;
@@ -58,14 +69,15 @@ export function recentConversations(conversations) {
 function overview(conversations, width, height) {
   const core = { x: width / 2, y: height * .43, radius: Math.min(80, width * .11), opacity: 1 };
   const recent = recentConversations(conversations);
-  const w = Math.min(184, width * .27);
-  const rx = Math.max(0, width / 2 - w / 2 - 24);
-  const ry = Math.max(50, height * .35 - 14);
-  // Offset avoids placing a bubble over the core caption below the equator.
+  const w = Math.min(168, width * .25);
+  // Stable asymmetric pockets; layout never jitters on refresh or depends on title length.
+  const pockets = [[-.29,-.30],[.28,-.24],[-.40,.03],[.39,.10],[-.24,.36],[.25,.39]];
   const nodes = recent.map((entity, i) => {
-    const angle = -Math.PI / 2 + (i + .5) * Math.PI * 2 / Math.max(6, recent.length);
-    return node('conversation', entity, core.x + Math.cos(angle) * rx,
-      core.y + Math.sin(angle) * ry, CORE_ID, { width: w, height: 62, radius: 22 });
+    const [px, py] = pockets[i];
+    const x = Math.max(w / 2 + 16, Math.min(width - w / 2 - 16, core.x + px * width));
+    const y = Math.max(56, Math.min(height - 54, core.y + py * height));
+    return node('conversation', entity, x, y, CORE_ID,
+      { width: w, height: 100, radius: 24, planet: true, orbOffsetY: -18 });
   });
   return { core, nodes, edges: edgesFor(core, nodes), width, height, requiredHeight: height };
 }
