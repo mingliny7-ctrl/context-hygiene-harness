@@ -23,6 +23,7 @@ def segment_nodes(index, cid):
                        'segmentId': s['segment_id'], 'kind': 'segment', 'conversationId': cid,
                        'categoryId': 'atlas:unclassified', 'title': a['title'], 'summary': a['summary'],
                        'keywords': a['keywords'], 'outcomes': a['outcomes'], 'keyAssistantAnswers': answers,
+                       'subtopics': a.get('subtopics', []),
                        'order': order, 'revision': s['revision'], 'messageCount': len(scope),
                        'messageRange': {'start': s['start_key'], 'end': s['end_key']},
                        'messageIndexRange': {'start': min((m['position'] for m in scope), default=0) + 1,
@@ -39,7 +40,8 @@ def exact_answer(index, cid, sid, key):
     if not segment:
         raise HTTPException(404, '该讨论主题不存在。')
     analysis = json.loads(segment['analysis_json'])
-    if key not in {r['message_id'] for r in analysis['key_assistant_answers']}:
+    refs = analysis['key_assistant_answers'] + [r for b in analysis.get('subtopics', []) for r in b['key_assistant_answers']]
+    if key not in {r['message_id'] for r in refs}:
         raise HTTPException(404, '该回答不是此主题的关键回答。')
     member = next((m for m in members if m['segment_id'] == sid and m['key'] == key and m['role'] == 'assistant'), None)
     stored = read_stored_conversation(cid, index.source_db)

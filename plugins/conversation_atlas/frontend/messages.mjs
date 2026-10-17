@@ -11,13 +11,13 @@ export function openMessages(detail, title, messageKey = null) {
   if (!dialog) {
     dialog = make('dialog', 'raw-dialog');
     dialog.id = 'raw-dialog';
-    dialog.setAttribute('aria-label', 'SQLite 原始消息');
+    dialog.setAttribute('aria-label', '对话完整原文');
     document.body.append(dialog);
   }
   dialog.replaceChildren();
   const header = make('header', 'raw-header');
   const heading = make('div');
-  heading.append(make('span', 'eyebrow', 'SQLITE / 原始观察记录'), make('h2', '', title), make('p', 'raw-id', detail.conversationId));
+  heading.append(make('span', 'eyebrow', '对话原文'), make('h2', '', title));
   const close = make('button', 'quiet-button', '关闭原文');
   close.addEventListener('click', () => dialog.close());
   header.append(heading, close);
@@ -27,7 +27,7 @@ export function openMessages(detail, title, messageKey = null) {
     : '部分历史顺序未确认；仅同组内已确认的相对顺序可信，组间不代表先后';
   const note = make('p', 'prototype-note', `${detail.messages.length} 条已存储消息 · ${orderNote}。完整历史未知；空正文保留。`);
   const jump = make('select', 'raw-jump');
-  jump.setAttribute('aria-label', '定位原始消息键');
+  jump.setAttribute('aria-label', '选择对话消息');
   const list = make('div', 'raw-message-list');
   const jumpTo = (key) => {
     jump.value = key;
@@ -36,7 +36,8 @@ export function openMessages(detail, title, messageKey = null) {
     if (target) { target.classList.add('located'); target.scrollIntoView({ block: 'start', behavior: 'instant' }); }
   };
   detail.messages.forEach((message, index) => {
-    const option = make('option', '', `${String(index + 1).padStart(2, '0')} · ${message.role} · ${message.key}`);
+    const role = {user:'用户提问',assistant:'模型回答'}[message.role] || message.role;
+    const option = make('option', '', `${String(index + 1).padStart(2, '0')} · ${role}`);
     option.value = message.key;
     jump.append(option);
     const article = make('article', 'raw-message');
@@ -46,7 +47,7 @@ export function openMessages(detail, title, messageKey = null) {
     const position = message.sourceOrder != null ? `对话顺序 ${message.sourceOrder + 1}`
       : message.relativeOrder != null ? `相对组 ${message.orderGroup + 1} / ${message.relativeOrder + 1} · 组间顺序未知`
       : '历史顺序未确认';
-    meta.append(make('strong', '', `${position} · ${message.role}`), make('code', '', message.key));
+    meta.append(make('strong', '', `${position} · ${role}`));
     article.append(meta, make('pre', '', message.content.trim() ? message.content : '〔Store 中正文为空，无法补全未采集内容〕'));
     list.append(article);
   });
@@ -67,7 +68,7 @@ export function openAnswer(detail, title) {
   const heading=make('div'); heading.append(make('span','eyebrow','原始对话 / 完整回答'),make('h2','',title));
   const close=make('button','quiet-button','关闭原文'); close.addEventListener('click',()=>dialog.close());
   header.append(heading,close); dialog.append(header);
-  dialog.append(make('p','prototype-note',detail.contextStatus==='ordered_adjacent' ? '用户提问按已确认的相邻顺序关联；未验证分支父子关系。' : '无法可靠关联用户提问，以下仅展示已定位的模型原文。'));
+  if(detail.contextStatus!=='ordered_adjacent') dialog.append(make('p','prototype-note','暂无法可靠关联用户提问，以下展示对应模型原文。'));
   const list=make('div','raw-message-list');
   for (const message of [...detail.questions,detail.answer]) {
     const article=make('article','raw-message'); article.dataset.messageKey=message.key;
@@ -79,8 +80,7 @@ export function openAnswer(detail, title) {
       if(part.startsWith('```')) {const pre=make('pre');pre.append(make('code','',part.replace(/^```[^\n]*\n/,'').replace(/```$/,'')));body.append(pre);}
       else body.append(make('div','',part));
     }
-    const original=make('details'); original.append(make('summary','','查看原始文本与来源定位'),make('code','',message.key),make('pre','',message.content));
-    article.append(body,original); list.append(article);
+    article.append(body); list.append(article);
   }
   dialog.append(list); dialog.showModal(); list.scrollTop=0;
 }

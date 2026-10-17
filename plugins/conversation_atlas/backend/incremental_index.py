@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from shared.conversation_store.database import DB_PATH
 from shared.conversation_store.identity import is_temporary_conversation_id
 from shared.conversation_store.store import read_stored_conversation
-from .analysis import SemanticAnalysis, validate_references
+from .analysis import validate_references
+from .segment_schema import SegmentAnalysis as SemanticAnalysis, validate_blocks
 from .analysis_cache import cache_path
 
 SCHEMA_VERSION = 1
@@ -310,7 +311,11 @@ class IncrementalIndex:
         if not isinstance(prompt_version, str) or not prompt_version.strip() or len(prompt_version) > 100:
             raise IndexErrorState('INVALID_PROMPT_VERSION')
         writes = [SegmentWrite.model_validate(u) for u in updates]
-        result_digest = digest({'updates': [u.model_dump() for u in writes], 'model': model, 'prompt_version': prompt_version})
+        normalized = [u.model_dump() for u in writes]
+        for update in normalized:
+            if not update['analysis']['subtopics']:
+                update['analysis'].pop('subtopics')  # Preserve pre-extension idempotency receipts.
+        result_digest = digest({'updates': normalized, 'model': model, 'prompt_version': prompt_version})
         job = self.batch(batch_id)
         if job is None:
             raise IndexErrorState('BATCH_NOT_FOUND')
@@ -380,6 +385,9 @@ class IncrementalIndex:
                 if len(answers) != len(set(answers)):
                     raise IndexErrorState('DUPLICATE_ANSWER_REFERENCE')
                 validate_references(u.analysis, {'messages': [by_key[k] for k in allowed]})
+                validate_blocks(u.analysis, [m for m in source if m['key'] in allowed])
+                if any(block.block_id is None for block in u.analysis.subtopics):
+                    raise IndexErrorState('BLOCK_ID_REQUIRED')
                 c.execute('''INSERT INTO atlas_segments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(conversation_id,segment_id) DO UPDATE SET
                     revision=excluded.revision,end_key=excluded.end_key,analysis_json=excluded.analysis_json,

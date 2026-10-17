@@ -1,7 +1,4 @@
 /** Pure, data-driven Atlas geometry. Rendering and mock data stay outside this module. */
-const MIN_WIDTH = 1000;
-const MIN_HEIGHT = 500;
-const MARGIN = 52;
 const CORE_ID = "atlas-core";
 
 const size = {
@@ -51,101 +48,47 @@ function edgesFor(core, nodes) {
   });
 }
 
-function overlaps(left, right, gap = 14) {
-  return Math.abs(left.x - right.x) < (left.width + right.width) / 2 + gap
-    && Math.abs(left.y - right.y) < (left.height + right.height) / 2 + gap;
+/** Only confirmed save events rank the home sky. Unknown legacy activity stays searchable. */
+export function recentConversations(conversations) {
+  return conversations.filter(item => dateValue(item.lastContentSavedAt) > 0)
+    .sort((a, b) => dateValue(b.lastContentSavedAt) - dateValue(a.lastContentSavedAt)
+      || String(a.id).localeCompare(String(b.id))).slice(0, 6);
 }
 
-function overview(categories, conversations, width, requestedHeight) {
-  const coreRadius = 80;
-  if (!categories.length) {
-    const core = { x: width / 2, y: requestedHeight / 2, radius: coreRadius, opacity: 1 };
-    return { core, nodes: [], edges: [], width, height: requestedHeight, requiredHeight: requestedHeight };
-  }
-
-  const latest = new Map();
-  for (const conversation of [...conversations].sort(chronological)) latest.set(conversation.categoryId, conversation);
-  let radiusX = Math.max(416, width * 0.31);
-  let radiusY = Math.max(189, requestedHeight * 0.378);
-  let nodes = [];
-  // Expanding the ellipse preserves the composition while allowing any data count.
-  // The finite cap also prevents hostile/malformed data from causing an endless layout loop.
-  for (let attempt = 0; attempt < 300; attempt += 1) {
-    nodes = [];
-    categories.forEach((category, index) => {
-      const angle = -Math.PI / 2 + index / categories.length * Math.PI * 2;
-      const cosine = Math.cos(angle);
-      const sine = Math.sin(angle);
-      const categoryNode = node("category", category, cosine * radiusX, sine * radiusY, CORE_ID);
-      nodes.push(categoryNode);
-      const conversation = latest.get(category.id);
-      if (conversation) {
-        // Treat each category and its recent conversation as one vertical cluster.
-        // The 82px center gap leaves 14px between their interactive bounding boxes.
-        nodes.push(node("conversation", conversation,
-          categoryNode.x,
-          categoryNode.y + 82,
-          category.id,
-          { width: 172, height: 46, radius: 18 }));
-      }
-    });
-    const coreBox = { x: 0, y: 0, width: coreRadius * 2, height: coreRadius * 2 };
-    const labelBox = { x: 0, y: coreRadius + 69, width: 320, height: 90 };
-    const colliding = nodes.some((item, index) => overlaps(item, coreBox, 3) || overlaps(item, labelBox, 14)
-      || nodes.slice(index + 1).some(other => overlaps(item, other)));
-    if (!colliding) break;
-    radiusX += 12;
-    radiusY += 28;
-  }
-
-  // Category particle satellites extend 50px above the button's center.
-  const top = Math.min(-coreRadius, ...nodes.map(item => item.y - (item.kind === "category" ? 50 : item.height / 2)));
-  const bottom = Math.max(coreRadius + 114, ...nodes.map(item => item.y + item.height / 2));
-  const offset = Math.max(requestedHeight * 0.48, -top + 1);
-  const requiredHeight = Math.ceil(Math.max(requestedHeight, bottom + offset + 1));
-  const requiredWidth = Math.ceil(Math.max(width, 2 * (Math.max(...nodes.map(item => Math.abs(item.x) + item.width / 2)) + 14)));
-  for (const item of nodes) { item.x += requiredWidth / 2; item.y += offset; }
-  const core = { x: requiredWidth / 2, y: offset, radius: coreRadius, opacity: 1 };
-  return { core, nodes, edges: edgesFor(core, nodes), width: requiredWidth, height: requiredHeight, requiredHeight };
+function overview(conversations, width, height) {
+  const core = { x: width / 2, y: height * .43, radius: Math.min(80, width * .11), opacity: 1 };
+  const recent = recentConversations(conversations);
+  const w = Math.min(184, width * .27);
+  const rx = Math.max(0, width / 2 - w / 2 - 24);
+  const ry = Math.max(50, height * .35 - 14);
+  // Offset avoids placing a bubble over the core caption below the equator.
+  const nodes = recent.map((entity, i) => {
+    const angle = -Math.PI / 2 + (i + .5) * Math.PI * 2 / Math.max(6, recent.length);
+    return node('conversation', entity, core.x + Math.cos(angle) * rx,
+      core.y + Math.sin(angle) * ry, CORE_ID, { width: w, height: 62, radius: 22 });
+  });
+  return { core, nodes, edges: edgesFor(core, nodes), width, height, requiredHeight: height };
 }
 
-/**
- * Input: {categories, conversations, segments}, UI state, available scene dimensions.
- * Node x/y are centers. The scene keeps a 1000px minimum width; its host owns scrolling.
- */
+/** A single responsive focus coordinate system, independent of entry direction. */
 export function computeLayout(data = {}, state = {}, viewport = {}) {
-  const width = Math.max(MIN_WIDTH, finite(viewport.width, MIN_WIDTH));
-  const requestedHeight = Math.max(MIN_HEIGHT, finite(viewport.height, MIN_HEIGHT));
-  const categories = [...(data.categories || [])].sort(chronological);
+  const width = Math.max(360, finite(viewport.width, 1000));
+  const height = Math.max(350, finite(viewport.height, 500));
   const conversations = data.conversations || [];
-  const segments = data.segments || [];
-  const category = categories.find(item => item.id === state.categoryId);
-  if (!category) return overview(categories, conversations, width, requestedHeight);
-
-  const children = conversations.filter(item => item.categoryId === category.id).sort(chronological);
-  const selectedConversation = children.find(item => item.id === state.conversationId);
-  const leaves = selectedConversation
-    ? segments.filter(item => item.conversationId === selectedConversation.id)
-      .sort((left, right) => finite(left.order, 0) - finite(right.order, 0) || chronological(left, right))
-    : [];
-  const rowGap = 92;
-  const segmentGap = 86;
-  const scaleX = width / MIN_WIDTH;
-  const initialHeight = Math.max(requestedHeight, (children.length - 1) * rowGap + size.conversation.height + MARGIN * 2);
-  const centerY = initialHeight / 2;
-  const core = { x: 90 * scaleX, y: centerY, radius: 44, opacity: 1 };
-  const nodes = [node("category", category, 245 * scaleX, centerY, CORE_ID)];
-  children.forEach((conversation, index) => nodes.push(node("conversation", conversation,
-    520 * scaleX, centerY + (index - (children.length - 1) / 2) * rowGap, category.id)));
-  const parentNode = nodes.find(item => item.id === selectedConversation?.id);
-  if (parentNode) leaves.forEach((segment, index) => nodes.push(node("segment", segment,
-    820 * scaleX, parentNode.y + (index - (leaves.length - 1) / 2) * segmentGap, parentNode.id)));
-
-  const top = Math.min(core.y - core.radius, ...nodes.map(item => item.y - item.height / 2));
-  const bottom = Math.max(core.y + core.radius, ...nodes.map(item => item.y + item.height / 2));
-  const offset = Math.max(0, MARGIN - top);
-  core.y += offset;
-  for (const item of nodes) item.y += offset;
-  const requiredHeight = Math.ceil(Math.max(initialHeight, bottom + offset + MARGIN));
-  return { core, nodes, edges: edgesFor(core, nodes), width, height: requiredHeight, requiredHeight };
+  const selected = conversations.find(item => item.id === state.conversationId);
+  if (!selected) return overview(conversations, width, height);
+  const leaves = (data.segments || []).filter(item => item.conversationId === selected.id)
+    .sort((a,b) => finite(a.order,0) - finite(b.order,0) || chronological(a,b));
+  const sceneWidth = Math.max(560, width);
+  const gap = 94;
+  const sceneHeight = Math.max(height, leaves.length * gap + 48);
+  const centerY = sceneHeight / 2;
+  const core = { x: 56, y: centerY, radius: 31, opacity: .8 };
+  const anchor = node('conversation', selected, sceneWidth * .32, centerY, CORE_ID,
+    { width: Math.min(208, sceneWidth * .29), height: 72, radius: 24 });
+  const nodes = [anchor, ...leaves.map((item,i) => node('segment', item, sceneWidth * .76,
+    centerY + (i - (leaves.length - 1)/2) * gap, anchor.id,
+    { width: Math.min(210, sceneWidth * .32), height: 70, radius: 22 }))];
+  return { core, nodes, edges: edgesFor(core,nodes), width: sceneWidth,
+    height: sceneHeight, requiredHeight: sceneHeight };
 }

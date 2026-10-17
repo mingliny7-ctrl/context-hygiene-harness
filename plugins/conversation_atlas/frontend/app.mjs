@@ -20,7 +20,7 @@ const icon = (name) => {
 const formatDate = (value) => value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', timeZone: 'Asia/Shanghai' }).format(new Date(value)) : '时间未知';
 const dateTime = (value) => value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai', hour12: false }).format(new Date(value)) : '未记录';
 const typeName = { category: '主题分类', conversation: 'Conversation / 对话', segment: 'Segment / 讨论阶段' };
-const state = { categoryId: null, conversationId: null, selectedId: null, inspectorOpen: false };
+const state = { categoryId: null, conversationId: null, selectedId: null, inspectorOpen: false, blockId: null };
 const nodeElements = new Map();
 const edgeElements = new Map();
 const removalTimers = new Map();
@@ -52,8 +52,9 @@ function announce(text) { $('announcer').textContent = text; }
 function choose(entity) {
   closeSearch();
   closeRecent();
+  state.blockId = null;
   state.selectedId = entity.id;
-  state.inspectorOpen = true;
+  state.inspectorOpen = entity.kind !== 'conversation';
   if (entity.kind === 'category') {
     state.categoryId = entity.id;
     state.conversationId = null;
@@ -126,9 +127,21 @@ function renderGraph() {
   $('breadcrumb-text').textContent = expanded ? [category?.title, conversation?.title].filter(Boolean).join(' / ') : '你的思考，自有引力。';
   $('view-label').textContent = conversation && isReal() ? '03 / STORED CONVERSATION' : conversation ? '03 / DISCUSSION SEGMENTS' : expanded ? '02 / CONVERSATIONS' : 'OVERVIEW / 全景';
   $('graph-hint').textContent = isReal() && !data.conversations.length ? '暂无已存储会话 · 打开已有 ChatGPT 对话并使用现有采集扩展同步' : window.innerWidth < 1100 ? '滚动探索图谱 · 点击节点查看详情' : conversation && isReal() ? '选择主题查看关键回答 · 仅手动分析新增内容' : conversation ? '选择讨论阶段，回看每一步思考与决定' : expanded ? '选择一段对话，查看已存储内容' : '选择一颗星球，沿着思考的轨迹探索';
+  if (conversation && isReal()) {
+    const original = el('button','quiet-button','浏览对话原文');
+    original.addEventListener('click',async()=>{
+      original.disabled=true;
+      try {const detail=await loadConversation(conversation.id);if(state.conversationId===conversation.id)openMessages(detail,conversation.title);}
+      catch(error){announce(error.message);}
+      finally {original.disabled=false;}
+    });
+    $('graph-hint').append(original);
+  }
+  if (!expanded && isReal() && data.conversations.length && !data.conversations.some(item=>item.lastContentSavedAt))
+    $('graph-hint').textContent='暂无可确认的近期保存事件 · 请通过搜索访问已有对话';
   const viewport = $('graph-viewport');
-  const width = Math.max(1000, viewport.clientWidth);
-  const height = Math.max(500, viewport.clientHeight);
+  const width = viewport.clientWidth;
+  const height = viewport.clientHeight;
   const layout = computeLayout(data, state, { width, height });
   const resizedOverview = !expanded && lastViewportWidth !== viewport.clientWidth;
   lastViewportWidth = viewport.clientWidth;
@@ -225,7 +238,7 @@ function renderGraph() {
   }
   $('column-labels').replaceChildren();
   if (expanded) {
-    const groups = [['category', '01 / 主题'], ['conversation', '02 / 对话'], ['segment', '03 / 讨论阶段']];
+    const groups = [['conversation', '对话'], ['segment', '主题']];
     for (const [kind, label] of groups) {
       const item = layout.nodes.find((node) => node.kind === kind);
       if (item) { const span = el('span', '', label); span.style.left = `${item.x}px`; $('column-labels').append(span); }
@@ -239,89 +252,77 @@ function inspectorSection(title, content) {
   return section;
 }
 
+function summaryContent(text, keywords = []) {
+  const content = el('div','inspector-summary');
+  // Presentation only: every source sentence remains; safe nodes instead of model HTML.
+  const paragraphs = text.includes('\n') ? text.split(/\n+/) : (text.match(/[^。！？]+[。！？]?/g) || [text]);
+  let group = '';
+  const add = value => {
+    const p = el('p');
+    for (const part of value.split(/(\*\*[^*]+\*\*)/g)) {
+      if (part.startsWith('**')) {p.append(el('strong','',part.slice(2,-2))); continue;}
+      const keyword=keywords.slice(0,3).find(word=>word.length>1 && part.includes(word));
+      if (!keyword) p.append(document.createTextNode(part));
+      else {const at=part.indexOf(keyword);p.append(document.createTextNode(part.slice(0,at)),el('strong','',keyword),document.createTextNode(part.slice(at+keyword.length)));}
+    }
+    content.append(p);
+  };
+  for (const paragraph of paragraphs) {
+    group += paragraph;
+    if (group.length >= 95 || text.includes('\n')) { add(group); group=''; }
+  }
+  if (group) add(group);
+  return content;
+}
+
 function renderInspector() {
-  detailController?.abort();
-  detailGeneration += 1;
+  detailController?.abort(); detailGeneration += 1;
   const panel = $('inspector');
   const entity = entityById(state.selectedId);
   panel.hidden = !state.inspectorOpen || !entity;
   if (panel.hidden) return;
   panel.replaceChildren();
-  const top = el('div', 'inspector-top');
-  const close = el('button', 'icon-button');
-  close.setAttribute('aria-label', '关闭详情');
-  close.append(icon('x-mark'));
-  close.addEventListener('click', closeInspector);
-  top.append(el('span', 'eyebrow', 'INSPECTOR / 思考切片'), close);
-  const badge = el('span', 'type-badge');
-  badge.append(el('i'), document.createTextNode(typeName[entity.kind]));
-  panel.append(top, badge, el('h2', '', entity.title), el('p', 'inspector-summary', entity.summary));
-  const outcomes = el('ul', 'outcomes');
-  entity.outcomes.forEach((text) => outcomes.append(el('li', '', text)));
-  if (isReal() && !entity.outcomes.length) outcomes.append(el('li', '', entity.kind === 'conversation' && entity.segmentCount ? '选择右侧主题，查看该主题的结论与关键回答。' : '暂无经引用校验的结论。'));
-  panel.append(inspectorSection('关键结论 / OUTCOMES', outcomes));
-  const keywords = el('div', 'keywords');
-  entity.keywords.forEach((word) => keywords.append(el('span', 'keyword', word)));
-  if (isReal() && !entity.keywords.length) keywords.append(el('span', 'keyword', '分类 / 关键词未处理'));
-  panel.append(inspectorSection('思考的关键词', keywords));
-  const metadata = el('dl', 'metadata');
-  const rows = [
-    [isReal() ? (entity.kind === 'segment' ? '原始讨论时间' : '首次入库时间') : '创建时间', dateTime(entity.createdAt)],
-    [isReal() ? (entity.kind === 'segment' ? '索引完成时间' : '最近同步时间') : '最近更新', dateTime(entity.updatedAt)],
-    ['所属主题', categoryFor(entity)?.title || entity.title],
-    ['消息数量', `${entity.messageCount} 条${isReal() ? ' · 已存储' : ' · 模拟'}`],
-  ];
-  if (entity.kind === 'category') rows.push(['包含对话', `${entity.conversationCount} 段`]);
-  if (entity.kind === 'conversation') { rows.push(['讨论主题', `${entity.segmentCount || 0} 个`]); if (isReal()) rows.push(['标题来源', entity.titleSource === 'first_segment_ai_title' ? '首个主题的 AI 展示名，非 ChatGPT 原始标题' : '已采集原文摘录，非原始标题']); }
-  rows.forEach(([key, value]) => metadata.append(el('dt', '', key), el('dd', '', value)));
-  panel.append(inspectorSection('时间与关联', metadata));
+  const top = el('div','inspector-top');
+  const close = el('button','icon-button'); close.setAttribute('aria-label','关闭详情'); close.append(icon('x-mark'));
+  close.addEventListener('click',closeInspector);
+  top.append(el('span','eyebrow','思考切片'),close); panel.append(top);
+  const block = (entity.subtopics || []).find(b=>b.block_id===state.blockId);
+  if (block) {
+    const back = el('button','back-button',`返回 ${entity.title}`);
+    back.addEventListener('click',()=>{state.blockId=null;renderInspector();}); panel.append(back);
+  }
+  const shown = block || entity;
+  panel.append(el('h2','',shown.title),summaryContent(shown.summary,entity.keywords));
   if (entity.kind === 'segment') {
-    const range = el('div', 'message-range');
-    range.append(el('div', '', `消息 ${entity.messageIndexRange.start}–${entity.messageIndexRange.end} · ${isReal() ? '已持久化来源范围' : '模拟范围'}`));
-    const refs = el('details'); refs.append(el('summary','','来源消息定位'),el('div','',entity.messageRange.start),el('div','',entity.messageRange.end)); range.append(refs);
-    panel.append(inspectorSection('可追溯消息范围', range));
+    const blocks = entity.subtopics || [];
+    if (!block && blocks.length) {
+      const list=el('div','content-blocks');
+      for (const child of blocks) {
+        const button=el('button','answer-reference');
+        button.append(el('strong','',child.title),el('small','',child.summary));
+        button.addEventListener('click',()=>{state.blockId=child.block_id;renderInspector();}); list.append(button);
+      }
+      panel.append(inspectorSection('深入主题',list));
+      renderKeyAnswers(entity,panel);
+    } else renderKeyAnswers(entity,panel,block?.key_assistant_answers,block?.title);
   }
-  if (entity.kind === 'conversation' && !isReal()) {
-    const collapse = el('button', 'source-disabled', '收拢讨论阶段');
-    collapse.append(icon('arrow-left'));
-    collapse.addEventListener('click', () => {
-      state.conversationId = null;
-      state.selectedId = state.categoryId;
-      renderInspector();
-      renderGraph();
-      nodeElements.get(state.categoryId)?.focus({ preventScroll: true });
-      announce('讨论阶段已收拢');
-    });
-    panel.append(collapse);
+  if (!block && entity.outcomes?.length) {
+    const list=el('ul','outcomes');
+    entity.outcomes.forEach(text=>list.append(el('li','',text)));
+    panel.append(inspectorSection('讨论要点',list));
   }
-  if (isReal()) {
-    if (entity.kind === 'conversation') {
-      if (entity.summarySource === 'verbatim_excerpt') panel.querySelector('.inspector-summary').prepend(document.createTextNode('原文摘录（非 AI 摘要）：'));
-      const q = entity.quality || {};
-      panel.append(el('div', 'prototype-note', `完整性未知 · ${q.emptyMessageCount || 0} 条空正文 · ${q.fallbackKeyCount || 0} 条 fallback 键。可信顺序与可分析性见上方状态；采集时间不代表讨论时间。${q.suspectedTestRecord ? ' 此 ID 带 test- 前缀，疑似测试记录；未当作真实用户成果。' : ''}`));
-      loadInspectorMessages(entity, panel);
-    } else if (entity.kind === 'segment') {
-      renderKeyAnswers(entity, panel);
-    } else {
-      panel.append(el('div', 'prototype-note', '未分类是当前 UI 的虚拟分组，不是 AI 分析结果。尚未生成摘要、关键词、结论或讨论阶段。'));
-    }
-    if (entity.kind === 'segment') panel.append(el('div', 'prototype-note', 'AI 生成的语义导航，尚未经人工确认；原始发送时间未采集时不以索引时间替代。'));
-    panel.scrollTop = 0;
-    return;
+  if (!block && entity.keywords?.length) {
+    const words=el('div','keywords'); entity.keywords.forEach(word=>words.append(el('span','keyword',word)));panel.append(words);
   }
-  const source = el('button', 'source-disabled', '打开原始对话 · 尚未接入');
-  source.disabled = true;
-  source.title = '当前为模拟数据，验收 UI 后再接入真实 Conversation Store。';
-  source.append(icon('arrow-up-right'));
-  panel.append(source, el('div', 'prototype-note', '演示内容 · 分类、摘要与阶段均为结构化模拟数据，尚未接入真实历史记录或 AI。'), el('div', 'inspector-id', `STABLE ID / ${entity.id}`));
-  panel.scrollTop = 0;
+  if (entity.kind==='conversation' && isReal()) loadInspectorMessages(entity,panel);
+  panel.scrollTop=0;
 }
 
 async function loadInspectorMessages(entity, panel) {
   const generation = detailGeneration;
   detailController = new AbortController();
   const content = el('div', 'stored-messages');
-  const section = inspectorSection('原始消息 / SQLITE', content);
+  const section = inspectorSection('对话原文', content);
   const open = el('button', 'source-disabled source-enabled', '正在读取原文…');
   open.disabled = true;
   panel.querySelector('h2').after(open);
@@ -453,7 +454,7 @@ try {
     $('guide-note').textContent = '当前读取现有 SQLite 与已完成索引。选择对话后可手动分析新增内容；打开和切换页面不调用模型。主题中的关键回答可定位完整原文。完整历史仍未知。演示模式只可通过 ?source=demo 明确开启。';
     const q = data.quality || {};
     $('data-notice').hidden = false;
-    $('data-notice').textContent = `${data.conversations.length} 条持久化会话 · ${q.messageCount || 0} 条消息 · ${q.emptyMessageCount || 0} 条空正文 · 完整性未知${q.suspectedTestRecordCount ? ` · 含 ${q.suspectedTestRecordCount} 条疑似测试 ID` : ''}`;
+    $('data-notice').textContent = `${data.conversations.length} 段已采集对话 · 首页显示最近保存的 6 段，其余可搜索访问`;
   }
   const stats = isReal() ? [[data.conversations.length, '存储会话'], [data.quality?.messageCount || 0, '已采集消息'], [data.segments.length, '已索引主题']] : [ [data.categories.length, '主题星球'], [data.conversations.length, '段对话'], [data.segments.length, '个讨论阶段'] ];
   stats.forEach(([count, label], index) => { if (index) $('universe-stats').append(el('span', 'stat-separator')); const stat = el('span', 'stat'); stat.append(el('strong', '', String(count).padStart(2, '0')), el('span', '', label)); $('universe-stats').append(stat); });
@@ -514,23 +515,24 @@ async function refreshGraph() {
   finally { refreshingGraph = false; }
 }
 
-function renderKeyAnswers(entity, panel) {
+function renderKeyAnswers(entity, panel, references, displayTitle = entity.title) {
+  const generation = detailGeneration;
   if (entity.sourceStatus !== 'ready') panel.append(el('p','prototype-note',indexReason(entity.sourceReason) || '该索引来源需要复核'));
   const list = el('div','key-answer-list');
-  for (const [i,ref] of (entity.keyAssistantAnswers || []).entries()) {
+  for (const [i,ref] of (references || entity.keyAssistantAnswers || []).entries()) {
     const button = el('button','answer-reference');
-    button.append(el('strong','',`关键回答 ${i+1}`),el('small','',ref.reason));
+    button.append(el('strong','',`阅读回答 ${i+1}`),el('small','',ref.reason));
     button.addEventListener('click',async()=>{
       button.disabled = true;
       try {
         const detail = await indexRequest(`/api/atlas/answer/${encodeURIComponent(entity.conversationId)}/${encodeURIComponent(entity.segmentId)}/${encodeURIComponent(ref.message_id)}`);
-        if (state.selectedId === entity.id) openAnswer(detail,entity.title);
+        if (state.selectedId === entity.id && generation === detailGeneration) openAnswer(detail,displayTitle);
       } catch(error) { announce(error.message); button.append(el('small','',error.message)); }
       finally {button.disabled=false;}
     });
     list.append(button);
   }
   if (!list.children.length) list.append(el('p','prototype-note','暂无可验证的关键回答引用。'));
-  const section = inspectorSection('重要模型回答 · 点击阅读原文',list);
-  panel.querySelector('.inspector-summary').before(section);
+  const section = inspectorSection('关键回答 · 查看完整原文',list);
+  panel.querySelector('.inspector-summary').after(section);
 }

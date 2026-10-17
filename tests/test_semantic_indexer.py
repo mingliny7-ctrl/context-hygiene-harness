@@ -220,3 +220,55 @@ def test_source_change_after_inference_never_automatically_reanalyzes(index):
     assert task['status']=='failed' and task['error_code']=='SOURCE_CHANGED'
     assert len(p.calls)==1 and index.read_segments('A')['segments']==[]
     r.close()
+
+
+def test_optional_blocks_persist_and_resolve_only_real_scoped_answers(index):
+    from plugins.conversation_atlas.backend.indexer import validate_output
+    index.initialize()
+    seed(index, [1,2,3,4])
+    plan=index.plan('A', complete_turns=True)
+    prepared=index.prepare_batch(plan, manual=True)
+    provider=FakeProvider()
+    response=provider.complete('',json.dumps({'pending':plan['pending'],'context':plan['context']}))
+    output=json.loads(response['content'])
+    analysis=output['segments'][0]['analysis']
+    analysis['subtopics']=[{'block_id':None,'title':title,'summary':'确定性测试子议题',
+        'message_ids':[msg(n)['key'],msg(n+1)['key']],
+        'key_assistant_answers':[{'message_id':msg(n+1)['key'],'reason':'此子议题回答'}]}
+        for n,title in [(1,'方案选择'),(3,'异常处理')]]
+    writes=validate_output(json.dumps(output),plan,prepared['batch_id'])
+    broken_writes=json.loads(json.dumps(writes))
+    broken_writes[0]['analysis']['subtopics'][0]['key_assistant_answers'][0]['message_id']=msg(4)['key']
+    with pytest.raises(ValueError):
+        index.commit_batch(prepared['batch_id'],broken_writes,model='test',prompt_version='test')
+    assert len(index.inspect('A')['appended'])==4
+    index.commit_batch(prepared['batch_id'],writes,model='test',prompt_version='test')
+    with TestClient(create_app(index.source_db,index.path)) as client:
+        graph=client.get('/api/atlas').json()
+        segment=graph['segments'][0]
+        assert len(segment['subtopics'])==2
+        assert all(b['block_id'].startswith('block:') for b in segment['subtopics'])
+        # First block answer is not the Segment's top-level last-answer pick.
+        from urllib.parse import quote
+        url='/api/atlas/answer/A/'+quote(segment['segmentId'],safe='')+'/'+quote(msg(2)['key'],safe='')
+        answer=client.get(url)
+        assert answer.status_code==200
+        assert answer.json()['answer']['content']==msg(2)['content']
+    assert index.inspect('A')['appended']==[]
+    broken=json.loads(json.dumps(output))
+    broken['segments'][0]['analysis']['subtopics'][0]['key_assistant_answers'][0]['message_id']=msg(4)['key']
+    with pytest.raises(ValueError):validate_output(json.dumps(broken),plan,prepared['batch_id'])
+
+
+def test_recent_activity_does_not_follow_duplicate_sync(index):
+    seed(index,[1,2])
+    with TestClient(create_app(index.source_db,index.path)) as client:
+        before=client.get('/api/atlas').json()['conversations'][0]['lastContentSavedAt']
+        assert before
+        # Force updated_at to differ without changing a saved Assistant event.
+        with sqlite3.connect(index.source_db) as c:
+            c.execute("UPDATE conversations SET updated_at='2099-01-01' WHERE conversation_id='A'")
+        seed(index,[1,2])
+        after=client.get('/api/atlas').json()['conversations'][0]['lastContentSavedAt']
+        assert before==after
+        assert client.get('/api/atlas').json()['conversations'][0]['activitySource']=='committed_assistant_save'

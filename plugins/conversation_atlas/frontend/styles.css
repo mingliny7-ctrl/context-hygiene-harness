@@ -27,3 +27,27 @@
 .raw-prose {line-height:1.85;overflow-wrap:anywhere;white-space:pre-wrap}
 .raw-prose pre {white-space:pre;overflow-x:auto;background:#050907;padding:16px;border-radius:10px}
 @media(max-width:900px){.analysis-controls{max-width:75%;gap:6px}.analysis-controls small{max-width:170px}.workspace-bar>.view-label{display:none}}
+
+/* One bounded focus scene; details remain readable without expanding all history. */
+.graph-scene{min-width:360px;min-height:350px}
+.graph-hint button{display:inline-flex;margin-left:18px;pointer-events:auto;color:#bcc9ad;font-size:11px}
+.atlas-app.expanded .core-label{opacity:0}
+.graph-node.overview-conversation{border-radius:34px;background:radial-gradient(ellipse at 28% 20%,#3a443258,#151b17eb 72%);padding:14px}
+.graph-node.segment{border-radius:24px}
+.node-title{font-size:13px;line-height:1.6}
+.inspector{flex-basis:380px;padding:26px}
+.inspector h2{font-size:23px;line-height:1.55;letter-spacing:.2px}
+.inspector-summary{font-size:15px;line-height:1.95;color:#cbd3c6}
+.inspector-summary p{margin:0 0 16px}
+.inspector-summary strong{color:#f1f0d7;font-weight:600}
+.inspector-section h3{font-size:13px;margin:22px 0 12px}
+.outcomes li{font-size:14px;line-height:1.9;margin:10px 0}
+.answer-reference{font-size:14px;line-height:1.7}
+.answer-reference small{font-size:13px}
+.raw-prose,.raw-message pre{font-size:16px;line-height:2}
+.raw-message-list{height:calc(100% - 140px)}
+.raw-dialog{width:min(1000px,calc(100% - 32px))}
+@media(min-width:1600px){.inspector{flex-basis:420px}}
+@media(min-width:761px) and (max-width:1179px){.inspector{position:relative;inset:auto;flex-basis:330px;width:330px}.graph-viewport.has-inspector{padding-right:0}}
+@media(max-width:1000px){.core-label small,.core-eyebrow{display:none}.core-label strong{font-size:18px}}
+@media(max-width:760px){.inspector{width:calc(100% - 24px);max-height:55vh;top:auto;bottom:195px}.raw-prose,.raw-message pre{font-size:14px}}

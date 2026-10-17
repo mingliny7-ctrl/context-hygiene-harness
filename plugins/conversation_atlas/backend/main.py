@@ -3,13 +3,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 import logging
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from shared.conversation_store.store import list_stored_conversations, read_stored_conversation
+from shared.conversation_store.database import get_read_connection
 from .incremental_index import IncrementalIndex, IndexErrorState
 from .indexer import SemanticIndexer
 from .segment_api import segment_nodes, exact_answer
@@ -86,10 +87,16 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
     @app.get("/api/atlas")
     def graph():
         rows = list_stored_conversations(db_path)
+        # Genuine committed Assistant save events; repeated sync timestamps are not activity.
+        with closing(get_read_connection(db_path)) as connection:
+            installed = connection.execute("SELECT 1 FROM sqlite_master WHERE name='collector_save_state'").fetchone()
+            activity = dict(connection.execute('SELECT conversation_id,saved_at FROM collector_save_state')) if installed else {}
         valid_rows = [row for row in rows if isinstance(row["conversation_id"], str) and row["conversation_id"].strip()]
         conversations = [conversation_node(row) for row in valid_rows]
         segments = []
         for node in conversations:
+            node['lastContentSavedAt'] = stored_time(activity.get(node['id']))
+            node['activitySource'] = 'committed_assistant_save' if node['lastContentSavedAt'] else 'unavailable'
             leaves = segment_nodes(index, node['id'])
             check = index.inspect(node['id'])
             node['indexState'] = check
