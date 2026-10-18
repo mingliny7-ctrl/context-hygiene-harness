@@ -46,12 +46,23 @@ function getConversationRoot(conversationId) {
 function readTitle(conversationId) {
     for (const link of document.querySelectorAll('a[href]')) {
         try {
-            const path = new URL(link.getAttribute('href'), location.origin).pathname;
+            // ChatGPT also has same-page "skip to content" hash links. Only its
+            // sidebar conversation rows are evidence of the original title.
+            const href = link.getAttribute('href') || '';
+            if (!link.hasAttribute('data-interactive-row-link') || !href.includes('/c/')) continue;
+            const path = new URL(href, location.origin).pathname;
             if (path.match(/\/c\/([^/]+)/)?.[1] === conversationId) {
                 const title = (link.innerText || link.textContent || '').trim();
                 if (title) return title;
             }
         } catch (_error) { /* Ignore unrelated links. */ }
+    }
+    // Direct /c/ pages set the browser tab title to this conversation's
+    // original title. Project pages set it to the project name, so never use
+    // that fallback there. Avoid a stale tab title during SPA navigation.
+    if (navigationVersion === 0 && /^\/c\/[^/]+\/?$/.test(location.pathname)) {
+        const title = (document.title || '').trim();
+        if (title && title !== 'ChatGPT') return title;
     }
     return ''; // No message excerpts masquerading as titles.
 }
@@ -83,10 +94,12 @@ function readVisibleMessages(root) {
         // Expand only a single-unit owner; never borrow media from adjacent messages.
         const readingRoot = source?.querySelectorAll?.('[data-content-search-unit-key]').length === 1 ? source : element;
         const presentation = typeof AtlasReadingCapture === 'undefined' ? null : AtlasReadingCapture.documentFor(readingRoot);
+        if (typeof AtlasReadingCapture !== 'undefined') AtlasReadingCapture.captureAvailableMedia?.(readingRoot, scheduleSync);
         if (role === "assistant") {
             content = content.replace(/^ChatGPT 说：\s*/, "");
             const state = element.closest('[data-talvt-turn-state]')?.getAttribute('data-talvt-turn-state');
-            if (state !== 'complete' || (!content.trim() && !(presentation && AtlasReadingCapture.hasImage(presentation.nodes)))) {
+            if (state !== 'complete' || /^无法加载此回复$/.test(content) ||
+                    (!content.trim() && !(presentation && AtlasReadingCapture.hasImage(presentation.nodes)))) {
                 pendingAssistants++;
                 continue; // Re-observe this native ID; publish only a completed body.
             }

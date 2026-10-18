@@ -4,13 +4,13 @@ import sqlite3
 import pytest
 from shared.conversation_store.database import init_db
 from shared.conversation_store.store import save_observation, read_stored_conversation
-from shared.conversation_store.presentation import validate_presentation, safe_url
+from shared.conversation_store.presentation import validate_presentation, safe_url, image_data_url, cache_public_images
 
 def document():
     return {'version':1,'nodes':[{'tag':'h2','children':[{'tag':'text','text':'真实标题'}]},
         {'tag':'p','children':[{'tag':'strong','text':'重点'}]},
         {'tag':'pre','children':[{'tag':'code','text':'def f():\n    return "<script>"'}]},
-        {'tag':'img','src':'https://images.openai.com/example.png','alt':'原始图片'}]}
+        {'tag':'img','src':'https://example.org/example.png','alt':'原始图片'}]}
 
 def test_format_only_capture_keeps_body_save_event_and_source_fingerprint(tmp_path):
     path=tmp_path/'source.db';init_db(path)
@@ -82,3 +82,35 @@ def test_presentation_never_invalidates_completed_segment_or_conversation_digest
     assert index.inspect('A')==before
     assert not index.plan('A')['pending']
     assert prepare_input('A',path)[1]['source_digest']==source_digest
+
+
+def test_local_image_bytes_survive_reopen_without_touching_message_body(tmp_path):
+    path=tmp_path/'source.db';init_db(path)
+    png=b'\x89PNG\r\n\x1a\n' + b'example image bytes'
+    uri=image_data_url('image/png',png)
+    message={'key':'native-user','role':'user','content':'看图'}
+    save_observation('A',[message],path)
+    save_observation('A',[{**message,'presentation':{'version':1,'nodes':[
+        {'tag':'img','src':uri,'alt':'用户附件'}, {'tag':'p','text':'看图'}]}}],path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute('select content from messages').fetchone()[0]=='看图'
+        assert uri in connection.execute('select payload_json from message_presentations').fetchone()[0]
+    row=read_stored_conversation('A',path)['messages'][0]
+    assert row['presentation']['nodes'][0]['src']==uri
+    assert safe_url('data:image/svg+xml;base64,PHN2Zz4=',image=True) is None
+
+
+def test_known_public_image_can_be_cached_locally(monkeypatch):
+    png=b'\x89PNG\r\n\x1a\n' + b'public image bytes'
+    class Response:
+        headers=type('Headers',(),{'get_content_type':lambda self:'image/png'})()
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def geturl(self):return 'https://images.openai.com/safe.png'
+        def read(self,limit):return png
+    class Opener:
+        def open(self,request,timeout):return Response()
+    monkeypatch.setattr('shared.conversation_store.presentation.build_opener',lambda *args:Opener())
+    document={'version':1,'nodes':[{'tag':'img','src':'https://images.openai.com/safe.png','alt':'图'}]}
+    cache_public_images(document)
+    assert document['nodes'][0]['src']==image_data_url('image/png',png)

@@ -35,19 +35,26 @@ test('local and temporary image resources cannot silently execute or be fetched'
   for(const value of ['javascript:x','data:text/html,x','blob:https://chatgpt.com/x','https://127.0.0.1/x','https://172.16.1.1/x'])assert.equal(safeUrl(value,true),null);
 });
 
+test('validated local image bytes render from the saved reading document',()=>{
+  const src='data:image/png;base64,iVBORw0KGgo=';
+  assert.equal(safeUrl(src,true),src);
+  const root=renderDocument({version:1,nodes:[{tag:'img',src,alt:'用户附件'}]},doc);
+  assert.equal(root.children[0].children[0].src,src);
+});
+
 test('actual multiline CODE inside a div keeps indentation without inventing fences in plain text',()=>{
   const root=renderDocument({version:1,nodes:[{tag:'div',children:[{tag:'code',children:[{tag:'text',text:'def f():\n    pass'}]}]}]},doc);
   assert.equal(root.children[0].children[0].tagName,'pre');
   assert.equal(root.textContent,'def f():\n    pass');
 });
 
-test('a different captured version requires explicit opt-in and cannot replace the saved body',()=>{
+test('a different captured version displays its structure with warning and retains the saved body',()=>{
   const message={content:'旧原文保留',observedPresentation:{version:1,nodes:[{tag:'h2',text:'当前页面标题'}]}};
   const root=renderReading(message,doc);
-  assert.ok(root.textContent.includes('旧原文保留'));
-  assert.ok(!root.textContent.includes('当前页面标题'));
-  root.children[1].handlers.click();
+  assert.ok(root.textContent.includes('旧正文和索引均未替换'));
   assert.ok(root.textContent.includes('当前页面标题'));
+  root.children[1].handlers.click();
+  assert.ok(root.textContent.includes('旧原文保留'));
   assert.equal(message.content,'旧原文保留');
-  root.children[1].handlers.click();assert.ok(root.textContent.includes('旧原文保留'));
+  root.children[1].handlers.click();assert.ok(root.textContent.includes('当前页面标题'));
 });

@@ -23,15 +23,19 @@ def saved_assistant_count(messages: list[dict]) -> tuple[int | None, str, int]:
     return len(answers), 'verified', confirmed
 
 
-def ensure_conversation(connection, conversation_id: str) -> None:
+def ensure_conversation(connection, conversation_id: str, original_title: str | None = None) -> None:
+    title = original_title.strip() if isinstance(original_title, str) else None
+    if not title:
+        title = None
     connection.execute(
         """
-        INSERT INTO conversations (conversation_id)
-        VALUES (?)
+        INSERT INTO conversations (conversation_id, original_title)
+        VALUES (?, ?)
         ON CONFLICT(conversation_id) DO UPDATE SET
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP,
+            original_title = COALESCE(excluded.original_title, conversations.original_title)
         """,
-        (conversation_id,),
+        (conversation_id, title),
     )
 
 
@@ -95,6 +99,7 @@ def save_observation(
     messages: list[dict],
     db_path: str | Path | None = None,
     observed_order: list[str] | None = None,
+    original_title: str | None = None,
 ) -> None:
     """Atomically merge a partial observation; absence NEVER deletes history."""
     if is_temporary_conversation_id(conversation_id):
@@ -102,7 +107,7 @@ def save_observation(
     connection = get_connection(db_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
-        ensure_conversation(connection, conversation_id)
+        ensure_conversation(connection, conversation_id, original_title)
         for message in messages:
             save_message(
                 connection,
@@ -158,15 +163,14 @@ def get_messages(conversation_id: str, db_path: str | Path | None = None) -> lis
 
 
 def list_stored_conversations(db_path: str | Path | None = None) -> list[dict]:
-    """Read stored metadata and a verbatim excerpt in a single SQLite snapshot.
-
-    The Store has no title, original chronology or collection-complete field.
-    This does not infer any of them or modify existing records.
-    """
+    """Read stored metadata and verbatim excerpts without inferring missing titles."""
     connection = get_read_connection(db_path)
     try:
-        rows = connection.execute("""
-            SELECT c.conversation_id, c.created_at, c.updated_at,
+        title_column = ('c.original_title' if 'original_title' in
+                        {row[1] for row in connection.execute('PRAGMA table_info(conversations)')}
+                        else 'NULL')
+        rows = connection.execute(f"""
+            SELECT c.conversation_id, {title_column} AS original_title, c.created_at, c.updated_at,
                    COUNT(m.message_key) AS message_count,
                    COALESCE(SUM(LENGTH(m.content)), 0) AS total_chars,
                    COALESCE(SUM(CASE WHEN TRIM(m.content) = '' THEN 1 ELSE 0 END), 0)
@@ -195,8 +199,11 @@ def read_stored_conversation(conversation_id: str, db_path: str | Path | None = 
     connection = get_read_connection(db_path)
     try:
         connection.execute("BEGIN")
+        title_column = ('original_title' if 'original_title' in
+                        {row[1] for row in connection.execute('PRAGMA table_info(conversations)')}
+                        else 'NULL')
         conversation = connection.execute(
-            "SELECT conversation_id, created_at, updated_at FROM conversations WHERE conversation_id = ?",
+            f"SELECT conversation_id, {title_column} AS original_title, created_at, updated_at FROM conversations WHERE conversation_id = ?",
             (conversation_id,),
         ).fetchone()
         if conversation is None:

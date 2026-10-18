@@ -31,6 +31,7 @@ class BridgeMessage(Message):
 
 class ConversationSyncRequest(BaseModel):
     conversation_id: str = Field(min_length=1, max_length=512)
+    title: str | None = Field(default=None, max_length=512)
     messages: list[BridgeMessage]
     observed_order: list[str] | None = None
 

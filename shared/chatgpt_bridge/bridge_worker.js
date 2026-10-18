@@ -43,6 +43,7 @@ async function syncOnce(conversationId, messages, metadata, serial) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             conversation_id: conversationId,
+            title: metadata.title,
             messages,
             observed_order: metadata.observedOrder,
         }),

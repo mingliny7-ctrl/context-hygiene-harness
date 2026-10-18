@@ -52,6 +52,23 @@ def test_existing_temporary_history_is_preserved(tmp_path):
     assert get_messages('local-chatgpt%3Alegacy', db)[0]['content'] == 'historical original'
 
 
+def test_sync_preserves_chatgpt_title_without_changing_message(tmp_path):
+    db = tmp_path / 'title.db'
+    payload = {'conversation_id': 'canonical-title', 'title': 'GPT账号协作方案',
+               'messages': [{'key': 'native-user', 'role': 'user', 'content': '原始正文'}]}
+    with TestClient(create_app(db)) as collector:
+        assert collector.post('/sync', json=payload).status_code == 200
+        payload.pop('title')  # Older extension sync cannot erase a verified title.
+        assert collector.post('/sync', json=payload).status_code == 200
+    with get_read_connection(db) as connection:
+        assert connection.execute('SELECT original_title FROM conversations').fetchone()[0] == 'GPT账号协作方案'
+        assert connection.execute('SELECT content FROM messages').fetchone()[0] == '原始正文'
+    with TestClient(atlas_app(db)) as atlas:
+        node = atlas.get('/api/atlas').json()['conversations'][0]
+        assert node['title'] == 'GPT账号协作方案'
+        assert node['titleSource'] == 'chatgpt_original_title'
+
+
 @contextmanager
 def backend(db, log_path):
     with socket.socket() as sock:

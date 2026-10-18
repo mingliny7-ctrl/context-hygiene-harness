@@ -9,7 +9,7 @@ const source = fs.readFileSync(
     'utf8'
 );
 
-function makeReader(initialRoute, nodes, readingCapture) {
+function makeReader(initialRoute, nodes, readingCapture, links = [], tabTitle = 'ChatGPT') {
     const sent = [];
     const timeouts = new Map();
     let nextTimeout = 1;
@@ -43,10 +43,11 @@ function makeReader(initialRoute, nodes, readingCapture) {
         location: page.location,
         URL,
         document: {
+            title: tabTitle,
             body: {},
             documentElement: {},
             querySelectorAll(selector) {
-                if(selector==='a[href]')return [];
+                if(selector==='a[href]')return links;
                 if(selector==='[data-app-shell-active-page="true"]'){
                     if(!roots.has(page.location.pathname))roots.set(page.location.pathname,{querySelectorAll:elements});
                     return [roots.get(page.location.pathname)];
@@ -109,6 +110,37 @@ test('reader keeps longer observed text even after the DOM shrinks', async () =>
     assert.equal(r.sent.length, 2);
     assert.equal(r.sent[1].messages[0].content, 'original very long message and new text');
     assert.equal(r.sent[1].messages[1].content, 'a long reply');
+});
+
+test('reader accepts only the exact ChatGPT sidebar row as original title', () => {
+    const link = (href, title, sidebar) => ({
+        getAttribute(name) { return name === 'href' ? href : null; },
+        hasAttribute(name) { return name === 'data-interactive-row-link' && sidebar; },
+        innerText: title,
+    });
+    const r = makeReader('/g/project/c/real-id', [{key:'turn-1:0:user',content:'question'}], null, [
+        link('#skip', '跳转到内容', false),
+        link('/g/project/c/other-id', '其他对话', true),
+        link('/g/project/c/real-id', '视频内容总结', true),
+    ]);
+    assert.equal(r.sent[0].title, '视频内容总结');
+});
+
+test('direct conversation page can use its tab title but a project page cannot', () => {
+    const direct = makeReader('/c/real-id', [{key:'turn-1:0:user',content:'question'}], null, [], 'GPT账号协作方案');
+    assert.equal(direct.sent[0].title, 'GPT账号协作方案');
+    const project = makeReader('/g/project/c/real-id', [{key:'turn-1:0:user',content:'question'}], null, [], '视频总结提炼');
+    assert.equal(project.sent[0].title, '');
+});
+
+test('a visible ChatGPT reply-load error never replaces a saved assistant body', () => {
+    const r = makeReader('/c/real-id', [
+        {key:'turn-1:0:user',content:'question'},
+        {key:'turn-1:1:assistant',content:'ChatGPT 说：无法加载此回复'},
+    ]);
+    assert.equal(r.sent[0].messages.length, 1);
+    assert.equal(r.sent[0].messages[0].role, 'user');
+    assert.equal(r.sent[0].pendingAssistants, 1);
 });
 
 test('reader isolates conversation caches and re-emits on chat switch', async () => {

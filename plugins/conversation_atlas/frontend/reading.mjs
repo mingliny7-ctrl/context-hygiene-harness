@@ -2,6 +2,7 @@
 export function safeUrl(value, image = false) {
   try {
     const u=new URL(value);
+    if(image && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length<=12_000_000) return value;
     if (!(image ? ['https:'] : ['https:','http:']).includes(u.protocol) || u.username || u.password) return null;
     if (/^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|\[)/i.test(u.hostname) || /\.(local|localhost)$/i.test(u.hostname) || (u.port && !['80','443'].includes(u.port))) return null;
     if (/^172\.(1[6-9]|2\d|3[01])\./.test(u.hostname)) return null;
@@ -86,12 +87,12 @@ export function renderReading(message, doc=document) {
   const container=doc.createElement('div');const presentation=message.presentation;
   const observed=message.observedPresentation||message.observed_presentation;
   if(!presentation&&observed?.version===1&&observed.nodes?.length) {
-    let showingObserved=false;
+    let showingObserved=true;
     const note=doc.createElement('p');note.className='reading-limitation';
     const toggle=doc.createElement('button');toggle.className='reading-version-toggle';
     const draw=()=>{
-      note.textContent=showingObserved?'当前显示另一次真实页面采集版本，完整性未知，与旧文本不同；原文和索引未被替换。':'重采页面与旧文本不同。默认保留已保存原文，可明确切换查看页面采集版本。';
-      toggle.textContent=showingObserved?'返回已保存文本':'查看本次页面采集版本（与旧文本不同）';
+      note.textContent=showingObserved?'当前显示再次采集的页面结构；它与旧正文不同，可能不完整。旧正文和索引均未替换，可切换核对。':'当前显示已保存的旧正文；其原始排版可能未采集。页面结构与旧正文不同。';
+      toggle.textContent=showingObserved?'查看已保存旧正文':'查看再次采集的页面结构';
       container.replaceChildren(note,toggle,renderDocument(showingObserved?observed:markdownDocument(message.content||''),doc));
     };
     toggle.addEventListener('click',()=>{showingObserved=!showingObserved;draw();});draw();return container;

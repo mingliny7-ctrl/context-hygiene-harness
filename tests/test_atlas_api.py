@@ -35,7 +35,8 @@ def test_real_graph_and_exact_raw_message_identity(tmp_path):
         assert node["categoryId"] == graph["categories"][0]["id"]
         assert node["segmentStatus"] == "unprocessed"
         assert node["keywords"] == node["outcomes"] == []
-        assert node["titleSource"] == "stored_message_excerpt"
+        assert node["titleSource"] == "missing_original_title"
+        assert node["needsTitleRecapture"] is True
         assert node["summarySource"] == "verbatim_excerpt"
         assert "原文标题" in node["summary"]
         assert node["quality"]["emptyMessageCount"] == 1
@@ -48,6 +49,28 @@ def test_real_graph_and_exact_raw_message_identity(tmp_path):
         assert raw["messages"][1]["content"] == "", "empty source records must never disappear or be synthesized"
         assert raw["quality"]["ordering"] == "unresolved"
         assert raw["conversationId"] == node["id"]
+
+
+def test_original_title_survives_sync_and_segment_title_stays_separate(tmp_path, monkeypatch):
+    path = tmp_path / 'store.db'
+    init_db(path)
+    message = {'key': 'native-user', 'role': 'user', 'content': '真实问题'}
+    save_observation('real-id', [message], path, original_title='GPT账号协作方案')
+    save_observation('real-id', [message], path)  # An old client cannot erase a verified title.
+    fake_segment = {'id': 'segment-1', 'title': '双账号协作续接', 'summary': '主题摘要'}
+    monkeypatch.setattr('plugins.conversation_atlas.backend.main.segment_nodes',
+                        lambda index, cid: [fake_segment] if cid == 'real-id' else [])
+    with TestClient(create_app(path)) as client:
+        graph = client.get('/api/atlas').json()
+        node = graph['conversations'][0]
+        assert node['title'] == 'GPT账号协作方案'
+        assert node['titleSource'] == 'chatgpt_original_title'
+        assert node['needsTitleRecapture'] is False
+        assert graph['segments'][0]['title'] == '双账号协作续接'
+        assert client.get('/api/atlas/conversations/real-id').json()['title'] == 'GPT账号协作方案'
+    save_observation('real-id', [message], path, original_title='GPT账号协作方案（已改名）')
+    with get_read_connection(path) as connection:
+        assert connection.execute('select original_title from conversations').fetchone()[0] == 'GPT账号协作方案（已改名）'
 
 
 def test_restart_persists_graph_and_raw_messages_without_writes(tmp_path):
@@ -94,10 +117,10 @@ def test_missing_title_dates_and_zero_messages_are_not_fabricated(tmp_path):
     path = tmp_path / "metadata.db"
     init_db(path)
     with get_connection(path) as connection:
-        connection.execute("INSERT INTO conversations VALUES ('test-empty', '', 'not-a-date')")
+        connection.execute("INSERT INTO conversations (conversation_id, created_at, updated_at) VALUES ('test-empty', '', 'not-a-date')")
     with TestClient(create_app(path)) as client:
         node = client.get("/api/atlas").json()["conversations"][0]
-        assert node["title"].startswith("未命名")
+        assert node["title"].startswith("原始标题待重新采集")
         assert node["createdAt"] is None and node["updatedAt"] is None
         assert node["messageCount"] == node["segmentCount"] == 0
         assert node["quality"]["suspectedTestRecord"] is True

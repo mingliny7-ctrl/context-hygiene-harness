@@ -18,6 +18,7 @@ test('worker forwards observed DOM order without using cumulative message array 
         {key:'early',role:'user',content:'early'},
     ],{observedOrder:['early','late']});
     assert.deepEqual(posted.observed_order,['early','late']);
+    assert.equal(posted.title,'');
 });
 
 function makeWorker(fetchMock) {

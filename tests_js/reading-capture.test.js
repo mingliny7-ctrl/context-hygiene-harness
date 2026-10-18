@@ -9,6 +9,7 @@ class Element {
   getAttribute(name){return this.attrs[name]??null;}
   hasAttribute(name){return name in this.attrs;}
   querySelector(tag){for(const child of this.childNodes){if(child.tagName===tag.toUpperCase())return child;const found=child.querySelector?.(tag);if(found)return found;}return null;}
+  querySelectorAll(tag){return this.childNodes.flatMap(child=>[...(child.tagName===tag.toUpperCase()?[child]:[]),...(child.querySelectorAll?.(tag)||[])]);}
 }
 const text=value=>({nodeType:3,nodeValue:value});
 const e=(tag,children=[],attrs={})=>new Element(tag,children,attrs);
@@ -30,4 +31,17 @@ test('visible DOM structure, exact code and image position survive without UI bu
 test('favicons are not answer images; temporary resources become explicit unavailable images',()=>{
   const value=capture.documentFor(e('div',[e('img',[],{src:'https://google.com/s2/favicons?x=1'}),e('img',[],{src:'blob:https://chatgpt.com/private',alt:'生成图'})]));
   assert.equal(value.nodes.length,1);assert.equal(value.nodes[0].src,null);
+});
+
+test('an accessible same-origin blob is attached to the same message as local image bytes',async()=>{
+  const url='blob:https://chatgpt.com/photo-1';
+  const img=e('img',[],{src:url,alt:'用户附件'});img.currentSrc=url;img.naturalWidth=2048;
+  const root=e('div',[img,e('p',[text('看图')])]);
+  const bytes=Buffer.from([137,80,78,71,13,10,26,10,1,2,3,4,5]);
+  context.btoa=s=>Buffer.from(s,'binary').toString('base64');
+  context.fetch=async target=>{assert.equal(target,url);return {async blob(){return {type:'image/png',size:bytes.length,async arrayBuffer(){return bytes}}}};};
+  await new Promise(resolve=>capture.captureAvailableMedia(root,resolve));
+  const captured=capture.documentFor(root);
+  assert.equal(captured.nodes[0].src,'data:image/png;base64,'+bytes.toString('base64'));
+  assert.equal(captured.nodes[1].tag,'p');
 });

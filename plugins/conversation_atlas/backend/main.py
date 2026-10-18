@@ -48,8 +48,9 @@ def conversation_node(row):
     excerpt = " ".join(raw_excerpt.split())
     return {
         "id": cid, "kind": "conversation", "categoryId": UNCLASSIFIED_ID,
-        "title": excerpt[:48] or f"未命名会话 · {cid[:12]}",
-        "titleSource": "stored_message_excerpt" if excerpt else "id_fallback",
+        "title": row.get('original_title') or f"原始标题待重新采集 · {cid[:12]}",
+        "titleSource": "chatgpt_original_title" if row.get('original_title') else "missing_original_title",
+        "needsTitleRecapture": not bool(row.get('original_title')),
         "summary": raw_excerpt[:180] if excerpt else "暂无非空消息正文。",
         "summarySource": "verbatim_excerpt", "previewMessageKey": row.get("preview_key"),
         "createdAt": stored_time(row.get("created_at")),
@@ -103,9 +104,7 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
             node['segmentCount'] = len(leaves)
             if leaves:
                 node['segmentStatus'] = 'indexed'
-                # A scoped AI display title, not the original ChatGPT title.
-                node.update(title=leaves[0]['title'], titleSource='first_segment_ai_title',
-                            summary=leaves[0]['summary'], summarySource='first_segment_summary')
+                node.update(summary=leaves[0]['summary'], summarySource='first_segment_summary')
             segments.extend(leaves)
         count = sum(row["message_count"] for row in valid_rows)
         dates = [node["createdAt"] for node in conversations if node["createdAt"]]
@@ -182,6 +181,8 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
         } for item in stored["messages"]]
         return {
             "conversationId": stored["conversation_id"], "messages": messages,
+            "title": stored.get('original_title'),
+            "titleSource": 'chatgpt_original_title' if stored.get('original_title') else 'missing_original_title',
             "createdAt": stored_time(stored["created_at"]), "updatedAt": stored_time(stored["updated_at"]),
             "quality": {**quality(len(messages), sum(not item["content"].strip() for item in messages),
                                sum(item["key"].startswith("fallback-turn-") for item in messages), conversation_id),

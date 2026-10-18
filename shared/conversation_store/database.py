@@ -33,8 +33,10 @@ def get_read_connection(db_path: str | Path | None = None) -> sqlite3.Connection
 def init_db(db_path: str | Path | None = None) -> None:
     connection = get_connection(db_path)
     try:
-        if (connection.execute("SELECT 1 FROM sqlite_master WHERE name='messages'").fetchone()
-                and not connection.execute("SELECT 1 FROM sqlite_master WHERE name='message_presentations'").fetchone()):
+        existing = connection.execute("SELECT 1 FROM sqlite_master WHERE name='messages'").fetchone()
+        columns = {row[1] for row in connection.execute('PRAGMA table_info(conversations)')}
+        if (existing and ('original_title' not in columns or
+                not connection.execute("SELECT 1 FROM sqlite_master WHERE name='message_presentations'").fetchone())):
             path = Path(db_path) if db_path is not None else DB_PATH
             backup = path.with_name(path.stem + '.reading-backup-' + uuid.uuid4().hex + '.db')
             with sqlite3.connect(backup) as destination:
@@ -44,10 +46,13 @@ def init_db(db_path: str | Path | None = None) -> None:
         connection.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 conversation_id TEXT PRIMARY KEY,
+                original_title TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """)
+        if 'original_title' not in {row[1] for row in connection.execute('PRAGMA table_info(conversations)')}:
+            connection.execute('ALTER TABLE conversations ADD COLUMN original_title TEXT')
         connection.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 conversation_id TEXT NOT NULL,
