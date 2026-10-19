@@ -19,6 +19,8 @@
         <nav class="main-nav" aria-label="主导航">
           <button class="nav-item active" id="home-nav" aria-current="page">我的图谱</button>
           <button class="nav-item" id="recent-toggle" aria-expanded="false" aria-controls="recent-panel">最近对话<span id="recent-count" class="nav-count"></span></button>
+          <button class="nav-item" id="hidden-toggle">已隐藏对话</button>
+          <button class="nav-item" id="bookmarks-toggle">我的收藏</button>
         </nav>
         <div class="header-actions"><span class="demo-badge"><i></i><span id="source-label">正在读取…</span></span><button class="quiet-button" id="guide-toggle">使用指南<img src="icons/arrow-up-right.svg" alt=""></button></div>
       </header>
@@ -26,7 +28,7 @@
       <section class="workspace" aria-label="对话图谱工作区">
         <div class="workspace-bar">
           <div class="breadcrumb"><button id="back-atlas" class="back-button" hidden><img src="icons/arrow-left.svg" alt="">返回 Atlas</button><span id="breadcrumb-text">你的思考，自有引力。</span></div>
-          <div class="analysis-controls"><small id="analysis-scope">选择一个对话后可分析新增内容</small><button id="analyze-new" class="quiet-button" disabled>分析新增内容</button><span id="analysis-status" role="status" aria-live="polite"></span></div>
+          <div class="analysis-controls"><small id="analysis-scope" class="sr-only">选择一个对话后可分析新增内容</small><button id="conversation-manage" class="quiet-button" hidden>管理对话</button><button id="analyze-new" class="quiet-button" disabled>分析新增内容</button><span id="analysis-status" role="status" aria-live="polite"></span></div>
           <span id="view-label" class="view-label">OVERVIEW / 全景</span>
         </div>
         <div class="workarea" id="workarea">
@@ -41,11 +43,9 @@
           </div>
           <aside id="inspector" class="inspector" aria-label="节点详情" hidden></aside>
         </div>
-        <p id="graph-hint" class="graph-hint">选择一颗星球，沿着思考的轨迹探索</p>
       </section>
 
       <section class="search-dock" aria-label="搜索历史对话">
-        <p id="data-notice" class="data-notice" hidden></p>
         <div class="universe-stats" id="universe-stats"></div>
         <form class="search-form" id="search-form" role="search">
           <img class="search-icon" src="icons/magnifying-glass.svg" alt="">
@@ -59,6 +59,9 @@
 
       <footer class="app-footer"><span><i class="workspace-dot"></i>LOCAL WORKSPACE<span class="footer-separator">/</span><span class="footer-detail">思考留下轨迹</span></span><button id="motion-toggle" class="motion-toggle" aria-pressed="false"><img src="icons/pause.svg" alt=""><span>暂停动效</span></button></footer>
       <section id="recent-panel" class="recent-panel" aria-label="最近的演示对话" hidden></section>
+      <dialog id="collection-dialog" class="collection-dialog" aria-labelledby="collection-title"><header class="collection-head"><h2 id="collection-title"></h2><button id="collection-close" class="icon-button" aria-label="关闭列表"><img src="icons/x-mark.svg" alt=""></button></header><div id="collection-list" class="collection-list"></div></dialog>
+      <dialog id="manage-dialog" class="collection-dialog manage-dialog" aria-labelledby="manage-title"><header class="collection-head"><h2 id="manage-title">管理对话</h2><button id="manage-close" class="icon-button" aria-label="关闭管理"><img src="icons/x-mark.svg" alt=""></button></header><div id="manage-options" class="collection-list"></div></dialog>
+      <dialog id="delete-dialog" class="collection-dialog manage-dialog" aria-labelledby="delete-title"><header class="collection-head"><h2 id="delete-title">永久删除本地对话</h2><button id="delete-close" class="icon-button" aria-label="取消删除"><img src="icons/x-mark.svg" alt=""></button></header><p id="delete-warning">将永久删除本机保存的原始消息、阅读结构、媒体、主题索引与收藏，并禁止采集器自动重新导入。ChatGPT 官方服务器上的对话不受影响。此操作不可撤销。</p><div class="delete-actions"><button id="delete-cancel" class="quiet-button">取消</button><button id="delete-confirm" class="danger-button">确认永久删除</button></div><p id="delete-error" role="alert" hidden></p></dialog>
       <dialog id="guide-dialog" class="guide-dialog" aria-labelledby="guide-title"><div class="dialog-top"><span class="eyebrow">A SMALL GUIDE TO YOUR UNIVERSE</span><button id="guide-close" class="icon-button" aria-label="关闭使用指南"><img src="icons/x-mark.svg" alt=""></button></div><h2 id="guide-title">从一次对话，走向一片星空。</h2><p>点击分类星球展开对话，再点击对话查看讨论阶段。最右侧的详情面板记录摘要、结论与消息范围。</p><ol><li><b>探索</b><span>分类 → Conversation → Segment，始终从左向右。</span></li><li><b>回看</b><span>用“返回 Atlas”收拢图谱；关闭详情不会改变展开层级。</span></li><li><b>寻找</b><span>按 / 开始搜索。按 Esc 关闭浮层或详情。</span></li></ol><div id="guide-note" class="prototype-note">当前是前端交互原型。内容、分类、阶段与时间均为模拟；搜索仅匹配本地关键词。未接入真实历史对话、AI 或原文跳转。</div><button id="guide-done" class="primary-button">开始探索<img src="icons/arrow-up-right.svg" alt=""></button></dialog>
       <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
       <div id="load-error" class="load-error" role="alert" hidden></div>

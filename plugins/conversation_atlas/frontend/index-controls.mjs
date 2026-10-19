@@ -51,9 +51,8 @@ export class IndexControls {
       this.button.disabled = running || source.status !== 'ready' || !pending;
       this.button.textContent = running ? '正在分析…' : '分析新增内容';
       this.status.textContent = `已索引 ${source.unchanged.length} 条 · 待分析 ${pending} 条` +
-        (value.budget ? ` · 每次最多 ${value.budget.requests} 次请求` : '') +
         (source.status !== 'ready' ? ` · ${indexReason(source.reason)}` : running ? ' · 后台处理中' :
-          task?.error_code ? ` · ${indexReason(task.error_code)}` : this.actionError ? ` · ${this.actionError}` : !pending ? ' · 已是最新状态' : ' · 仅点击后调用 AI');
+          task?.error_code ? ` · ${indexReason(task.error_code)}` : this.actionError ? ` · ${this.actionError}` : !pending ? ' · 已是最新状态' : '');
       const signature = JSON.stringify([source,task?.run_id,task?.status,task?.committed_batches]);
       if (this.signature && signature !== this.signature) this.onUpdate();
       this.signature = signature;

@@ -36,7 +36,8 @@ def init_db(db_path: str | Path | None = None) -> None:
         existing = connection.execute("SELECT 1 FROM sqlite_master WHERE name='messages'").fetchone()
         columns = {row[1] for row in connection.execute('PRAGMA table_info(conversations)')}
         if (existing and ('original_title' not in columns or
-                not connection.execute("SELECT 1 FROM sqlite_master WHERE name='message_presentations'").fetchone())):
+                not connection.execute("SELECT 1 FROM sqlite_master WHERE name='message_presentations'").fetchone() or
+                not connection.execute("SELECT 1 FROM sqlite_master WHERE name='collector_tombstones'").fetchone())):
             path = Path(db_path) if db_path is not None else DB_PATH
             backup = path.with_name(path.stem + '.reading-backup-' + uuid.uuid4().hex + '.db')
             with sqlite3.connect(backup) as destination:
@@ -88,6 +89,9 @@ def init_db(db_path: str | Path | None = None) -> None:
             body_digest TEXT NOT NULL, payload_json TEXT NOT NULL, captured_at TEXT NOT NULL,
             PRIMARY KEY(conversation_id,message_key),
             FOREIGN KEY(conversation_id,message_key) REFERENCES messages(conversation_id,message_key) ON DELETE CASCADE)''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS collector_tombstones (
+            conversation_id TEXT PRIMARY KEY, deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )''')
         connection.commit()
     finally:
         connection.close()

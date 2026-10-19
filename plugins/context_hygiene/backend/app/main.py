@@ -16,6 +16,7 @@ from shared.conversation_store.store import (
     get_collection_snapshot,
     save_observation,
     saved_assistant_count,
+    DeletedConversationError,
 )
 
 
@@ -59,13 +60,16 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
                 status_code=409,
                 detail="Temporary ChatGPT conversation: wait for canonical ID",
             )
-        save_observation(
-            conversation_id=request.conversation_id,
-            messages=[item.model_dump() for item in request.messages],
-            db_path=db_path,
-            observed_order=request.observed_order,
-            original_title=request.title,
-        )
+        try:
+            save_observation(
+                conversation_id=request.conversation_id,
+                messages=[item.model_dump() for item in request.messages],
+                db_path=db_path,
+                observed_order=request.observed_order,
+                original_title=request.title,
+            )
+        except DeletedConversationError as error:
+            raise HTTPException(status_code=410, detail=str(error)) from error
         return build_receipt(request.conversation_id)
 
     @app.get(

@@ -14,6 +14,7 @@ from shared.conversation_store.database import get_read_connection
 from .incremental_index import IncrementalIndex, IndexErrorState
 from .indexer import SemanticIndexer
 from .segment_api import segment_nodes, exact_answer
+from .management import AtlasManagement, ManagementError
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 logger = logging.getLogger(__name__)
@@ -66,12 +67,26 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
                provider_factory=None, budget=None) -> FastAPI:
     index = IncrementalIndex(db_path, analysis_db_path)
     indexer = SemanticIndexer(index, provider_factory, budget)
+    management = AtlasManagement(index.source_db, index.path)
     @asynccontextmanager
     async def lifespan(app):
         yield  # No migrations, model configuration or inference on startup.
         indexer.close()
     app = FastAPI(title="Conversation Atlas · read-only Store integration", lifespan=lifespan)
     app.state.indexer = indexer
+    app.state.management = management
+
+    def management_action(request: Request):
+        origin = request.headers.get('origin')
+        if request.headers.get('x-atlas-action') != 'manage-conversation' or (origin and origin != str(request.base_url).rstrip('/')):
+            raise HTTPException(403, '仅接受 Atlas 页面明确发起的管理操作。')
+
+    def managed(call):
+        try:
+            return call()
+        except ManagementError as error:
+            raise HTTPException(404 if error.code == 'NOT_FOUND' else 409,
+                                detail={'code': error.code, 'message': str(error)}) from error
 
     @app.middleware("http")
     async def no_cached_history(request: Request, call_next):
@@ -92,7 +107,8 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
         with closing(get_read_connection(db_path)) as connection:
             installed = connection.execute("SELECT 1 FROM sqlite_master WHERE name='collector_save_state'").fetchone()
             activity = dict(connection.execute('SELECT conversation_id,saved_at FROM collector_save_state')) if installed else {}
-        valid_rows = [row for row in rows if isinstance(row["conversation_id"], str) and row["conversation_id"].strip()]
+        hidden = management.hidden_ids()
+        valid_rows = [row for row in rows if isinstance(row["conversation_id"], str) and row["conversation_id"].strip() and row['conversation_id'] not in hidden]
         conversations = [conversation_node(row) for row in valid_rows]
         segments = []
         for node in conversations:
@@ -107,6 +123,8 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
                 node.update(summary=leaves[0]['summary'], summarySource='first_segment_summary')
             segments.extend(leaves)
         count = sum(row["message_count"] for row in valid_rows)
+        stored_count = sum(row['message_count'] for row in rows)
+        stored_segment_count = len(segments) + sum(len(segment_nodes(index, row['conversation_id'])) for row in rows if row['conversation_id'] in hidden)
         dates = [node["createdAt"] for node in conversations if node["createdAt"]]
         updates = [node["updatedAt"] for node in conversations if node["updatedAt"]]
         categories = [{
@@ -123,13 +141,63 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
             "categories": categories, "conversations": conversations, "segments": segments,
             "quality": {
                 "storedConversationCount": len(rows), "visibleConversationCount": len(conversations),
-                "skippedInvalidIdCount": len(rows) - len(valid_rows), "messageCount": count,
+                "hiddenConversationCount": len(hidden), "storedSegmentCount": stored_segment_count,
+                "skippedInvalidIdCount": sum(not isinstance(row['conversation_id'], str) or not row['conversation_id'].strip() for row in rows), "messageCount": stored_count,
+                "visibleMessageCount": count,
                 "emptyMessageCount": sum(row["empty_message_count"] for row in valid_rows),
                 "fallbackKeyCount": sum(row["fallback_key_count"] for row in valid_rows),
                 "suspectedTestRecordCount": sum(node["quality"]["suspectedTestRecord"] for node in conversations),
                 "completeness": "unknown", "ordering": "not_evaluated",
             },
         }
+
+    @app.get('/api/atlas/hidden')
+    def hidden_conversations():
+        return {'conversations': management.hidden()}
+
+    @app.post('/api/atlas/conversations/{conversation_id}/hide')
+    def hide_conversation(conversation_id: str, request: Request):
+        management_action(request)
+        return managed(lambda: management.set_hidden(conversation_id, True))
+
+    @app.post('/api/atlas/conversations/{conversation_id}/restore')
+    def restore_conversation(conversation_id: str, request: Request):
+        management_action(request)
+        return managed(lambda: management.set_hidden(conversation_id, False))
+
+    @app.delete('/api/atlas/conversations/{conversation_id}')
+    def delete_conversation(conversation_id: str, request: Request):
+        management_action(request)
+        if (indexer.latest(conversation_id) or {}).get('status') in ('queued', 'running'):
+            raise HTTPException(409, '该对话正在分析，结束后才能删除。')
+        return managed(lambda: management.delete(conversation_id))
+
+    @app.get('/api/atlas/tombstones')
+    def deleted_conversations():
+        return {'conversations': management.tombstones()}
+
+    @app.post('/api/atlas/tombstones/{conversation_id}/allow-recapture')
+    def allow_recapture(conversation_id: str, request: Request):
+        management_action(request)
+        return managed(lambda: management.allow_recapture(conversation_id))
+
+    @app.get('/api/atlas/bookmarks')
+    def bookmarks():
+        return {'bookmarks': management.bookmarks()}
+
+    @app.put('/api/atlas/bookmarks/{conversation_id}/{message_key}')
+    def save_bookmark(conversation_id: str, message_key: str, request: Request):
+        management_action(request)
+        return managed(lambda: management.set_bookmark(conversation_id, message_key, True))
+
+    @app.delete('/api/atlas/bookmarks/{conversation_id}/{message_key}')
+    def remove_bookmark(conversation_id: str, message_key: str, request: Request):
+        management_action(request)
+        return managed(lambda: management.set_bookmark(conversation_id, message_key, False))
+
+    @app.get('/api/atlas/bookmarks/{conversation_id}/{message_key}/answer')
+    def bookmarked_answer(conversation_id: str, message_key: str):
+        return managed(lambda: management.bookmark_answer(conversation_id, message_key))
 
     @app.get('/api/atlas/index-state/{conversation_id}')
     def index_state(conversation_id: str):

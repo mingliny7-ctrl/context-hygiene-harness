@@ -10,6 +10,10 @@ from shared.conversation_store.message_order import save_order_evidence, order_m
 from shared.conversation_store.presentation import save_presentation, body_digest
 
 
+class DeletedConversationError(ValueError):
+    """An explicit local deletion forbids automatic Collector re-import."""
+
+
 def saved_assistant_count(messages: list[dict]) -> tuple[int | None, str, int]:
     """Only native-identity rows can prove unique saved answers.
 
@@ -107,6 +111,9 @@ def save_observation(
     connection = get_connection(db_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE name='collector_tombstones'").fetchone():
+            if connection.execute('SELECT 1 FROM collector_tombstones WHERE conversation_id=?', (conversation_id,)).fetchone():
+                raise DeletedConversationError('该对话已在本地永久删除；需明确解除禁止重新采集状态。')
         ensure_conversation(connection, conversation_id, original_title)
         for message in messages:
             save_message(
