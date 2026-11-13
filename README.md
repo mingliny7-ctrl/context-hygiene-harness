@@ -1,5 +1,7 @@
 # Context Harness
 
+Windows 桌面入口：运行一次 `scripts/create_desktop_shortcut.ps1`，桌面会出现「Conversation Atlas」。双击后复用现有后台启动器检查并启动 Collector 与 Atlas；两项服务就绪后在默认浏览器打开图谱。重复双击不会重复启动服务。若项目目录移动，重新运行脚本以更新快捷方式。启动诊断保存在当前用户的 `%LOCALAPPDATA%\ContextHarness\logs\desktop-host\`。
+
 Module 2：Reader现按活动SPA页面与原始消息UUID采集完成回答；Popup显示当前真实标题、可靠的已保存模型回复数及保存状态，字符数已移除。旧fallback历史不清理，总数无法确认时明确显示暂不可用。实测记录及未验证边界见 [Reader稳定性修复](docs/conversation-reader-module-2.md)。
 
 2026-10-15 产品更新：上下文风险检测业务已停用。当前服务保留 ChatGPT 自动采集、Conversation SQLite 持久化及 Atlas 只读能力。`/sync` 和 `/conversations/{id}/status` 返回 `SAVED` 采集回执，不加载 Monitor；旧 `/analyze` 返回410。详情与验收记录见 [采集与风险检测解耦](docs/collection-risk-decoupling.md)。
