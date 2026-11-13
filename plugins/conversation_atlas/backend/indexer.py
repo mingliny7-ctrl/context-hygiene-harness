@@ -54,15 +54,17 @@ class Segmentation(BaseModel):
 @dataclass(frozen=True)
 class Budget:
     requests: int = 2
-    input_tokens: int = 64000
+    input_tokens: int = 262144
     output_tokens: int = 8192
-    per_input: int = 32000
+    per_input: int | None = None
     per_output: int = 4096
     context: int = 4000
     seconds: int = 360
 
     def __post_init__(self):
-        if not 1 <= self.requests <= 4 or not 16000 <= self.per_input <= 64000 or not 512 <= self.per_output <= 8192:
+        if (not 1 <= self.requests <= 4 or not 16000 <= self.input_tokens <= 4194304
+                or (self.per_input is not None and not 16000 <= self.per_input <= 1048576)
+                or not 512 <= self.per_output <= 8192):
             raise ValueError('Invalid inference budget')
 
     @classmethod
@@ -151,6 +153,16 @@ class SemanticIndexer:
         self.guard = threading.Lock()
         self.future = None
 
+    def _plan_bytes(self, context_tokens=None):
+        # No fixed per-turn cap: use the configured model capacity and the
+        # manual action's aggregate budget, reserving room for prompt/schema.
+        capacity = self.budget.input_tokens
+        if context_tokens is not None:
+            capacity = min(capacity, context_tokens - self.budget.per_output)
+        if self.budget.per_input is not None:
+            capacity = min(capacity, self.budget.per_input)
+        return capacity - 10000
+
     def initialize(self):
         self.index.initialize()
         with self.index._read() as c:
@@ -200,7 +212,7 @@ class SemanticIndexer:
                 raise
             try:
                 self.initialize()
-                plan = self.index.plan(cid, max_input_bytes=self.budget.per_input - 10000,
+                plan = self.index.plan(cid, max_input_bytes=self._plan_bytes(),
                                        max_context_bytes=self.budget.context, complete_turns=True, context_excerpt=True)
                 if not plan['pending']:
                     lock.close()
@@ -239,7 +251,7 @@ class SemanticIndexer:
                 if through_key in status['unchanged']:
                     self._finish(run_id, 'completed'); return
                 try:
-                    plan = self.index.plan(cid, max_input_bytes=self.budget.per_input - 10000,
+                    plan = self.index.plan(cid, max_input_bytes=self._plan_bytes(provider.config.context_tokens),
                                            max_context_bytes=self.budget.context, complete_turns=True, through_key=through_key, context_excerpt=True)
                 except IndexErrorState as error:
                     self._finish(run_id, 'paused', str(error)); return
@@ -250,7 +262,8 @@ class SemanticIndexer:
                 if (current['requests'] >= self.budget.requests or time.monotonic() - started >= self.budget.seconds
                         or current['input_tokens'] + upper > self.budget.input_tokens
                         or current['output_tokens'] + self.budget.per_output > self.budget.output_tokens
-                        or upper > self.budget.per_input or upper + self.budget.per_output > provider.config.context_tokens):
+                        or (self.budget.per_input is not None and upper > self.budget.per_input)
+                        or upper + self.budget.per_output > provider.config.context_tokens):
                     self._finish(run_id, 'paused', 'BUDGET_EXHAUSTED'); return
                 prepared = self.index.prepare_batch(plan, manual=True)
                 if not prepared['created']:

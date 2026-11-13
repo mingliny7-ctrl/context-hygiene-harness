@@ -144,6 +144,40 @@ def test_incomplete_turn_and_turn_budget_do_not_silently_split(index):
     r.close()
 
 
+def test_complete_discussion_larger_than_old_22kb_limit_is_indexed(index):
+    messages = [msg(1, '分析这段讨论')]
+    messages.extend({
+        'key': f'chatgpt:{n:08x}-0000-4000-8000-000000000000:assistant',
+        'role': 'assistant', 'content': '解释' * 1200,
+    } for n in range(2, 7))
+    save_observation('A', messages, index.source_db,
+                     observed_order=[m['key'] for m in messages])
+    provider = FakeProvider()
+    runner = SemanticIndexer(index, lambda: provider)
+    runner.start('A')
+    assert wait(runner)['status'] == 'completed'
+    assert len(provider.calls) == 1
+    assert len(provider.calls[0]['pending']) == 6
+    assert index.inspect('A')['appended'] == []
+    runner.close()
+
+
+def test_model_capacity_still_prevents_truncated_or_oversized_request(index):
+    seed(index, [1, 2])
+    with sqlite3.connect(index.source_db) as c:
+        c.execute('UPDATE messages SET content=? WHERE message_key=?',
+                  ('完整回答' * 4000, msg(2)['key']))
+    provider = FakeProvider()
+    provider.config = LLMConfig(context_tokens=20000)
+    runner = SemanticIndexer(index, lambda: provider)
+    runner.start('A')
+    task = wait(runner)
+    assert task['status'] == 'paused' and task['error_code'] == 'TURN_TOO_LARGE'
+    assert provider.calls == []
+    assert len(index.inspect('A')['appended']) == 2
+    runner.close()
+
+
 def test_budget_and_usage_audit_no_raw_bodies_or_secrets(index):
     seed(index,[1,2]); p = FakeProvider(); r = SemanticIndexer(index,lambda:p,budget=Budget(requests=1))
     r.start('A'); task=wait(r)
