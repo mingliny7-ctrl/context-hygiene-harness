@@ -1,4 +1,5 @@
-import { loadAtlas, loadConversation, searchAtlas } from './data/atlas-source.mjs';
+import { loadAtlas, loadConversation, searchAtlas, atlasChanged } from './data/atlas-source.mjs';
+import { VisiblePoller } from './polling.mjs';
 import { openMessages, openAnswer } from './messages.mjs';
 import { IndexControls, indexRequest, indexReason } from './index-controls.mjs';
 import { computeLayout, bezierPath } from './layout.mjs';
@@ -547,7 +548,7 @@ function setupEvents() {
     if (!event.target.closest('.search-dock')) closeSearch();
     if (!event.target.closest('#recent-toggle, #recent-panel')) closeRecent();
   });
-  window.addEventListener('pagehide', () => { clearInterval(pollTimer); field.destroy(); resizeObserver.disconnect(); removalTimers.forEach(clearTimeout); });
+  window.addEventListener('pagehide', () => { pollTimer?.stop(); field.destroy(); resizeObserver.disconnect(); removalTimers.forEach(clearTimeout); });
   window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => renderGraph());
 }
 
@@ -579,7 +580,11 @@ try {
   setupEvents();
   if (isReal()) {
     indexControls = new IndexControls({button:$('analyze-new'),scope:$('analysis-scope'),status:$('analysis-status'),onUpdate:refreshGraph});
-    pollTimer = setInterval(() => { indexControls.refresh(); refreshGraph(); }, 4000);
+    pollTimer = new VisiblePoller(async () => {
+      await refreshGraph(true);
+      await indexControls.refresh();
+    });
+    pollTimer.start();
   }
   resizeObserver = new ResizeObserver(renderGraph);
   resizeObserver.observe($('graph-viewport'));
@@ -602,10 +607,11 @@ function updateAnalysisScope() {
   indexControls?.select(conversation?.id || null, conversation?.title);
 }
 
-async function refreshGraph() {
+async function refreshGraph(checkRevision = false) {
   if (!isReal() || refreshingGraph) return;
   refreshingGraph = true;
   try {
+    if (checkRevision && !await atlasChanged(data.revision)) return;
     const next = await loadAtlas();
     if (JSON.stringify(next) === JSON.stringify(data)) return;
     const oldSelected = JSON.stringify(entityById(state.selectedId));

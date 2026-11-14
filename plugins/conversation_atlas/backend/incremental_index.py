@@ -189,6 +189,7 @@ class IncrementalIndex:
             raise IndexErrorState(status['reason'])
         messages = self._source(cid)
         members, segments = self._state(cid)
+        source_map = {m['key']: m for m in messages}
         # Re-read consistency: reject an observation/state change during plan construction.
         known = {m['key']: m for m in members}
         if [m['key'] for m in messages if m['key'] not in known] != status['appended']:
@@ -205,7 +206,6 @@ class IncrementalIndex:
             context['segment']['analysis'] = json.loads(tail['analysis_json'])
             if len(encoded(context).encode()) > max_context_bytes:
                 raise IndexErrorState('CONTEXT_TOO_LARGE')
-            source_map = {m['key']: m for m in messages}
             for old in reversed(members):
                 if old['segment_id'] != tail['segment_id']:
                     break
@@ -240,14 +240,17 @@ class IncrementalIndex:
                 raise IndexErrorState('SOURCE_CHANGED')
             candidates = candidates[:keys.index(through_key) + 1]
         pending = []
+        pending_bytes = len(encoded({'context': context, 'pending': []}).encode()) + 2048
         for m in candidates:
             item = {k: m[k] for k in ('key', 'role', 'content')}
             # Reserve 2048 bytes for prompt/schema; no body truncation or full-history fallback.
-            if len(encoded({'context': context, 'pending': pending + [item]}).encode()) + 2048 > max_input_bytes:
+            item_bytes = len(encoded(item).encode()) + bool(pending)
+            if pending_bytes + item_bytes > max_input_bytes:
                 if not pending:
                     raise IndexErrorState('MESSAGE_TOO_LARGE')
                 break
             pending.append(item)
+            pending_bytes += item_bytes
         if complete_turns and pending:
             ends = turn_ends(candidates)
             fitting = [end for end in ends if end <= len(pending)]
@@ -255,7 +258,7 @@ class IncrementalIndex:
                 raise IndexErrorState('INCOMPLETE_TURN' if not ends else 'TURN_TOO_LARGE')
             pending = pending[:max(fitting)]
         manifest = {'conversation_id': cid, 'pending': [fingerprint(m) for m in pending],
-                    'context': [fingerprint(next(original for original in messages if original['key'] == m['key'])) for m in context['messages']],
+                    'context': [fingerprint(source_map[m['key']]) for m in context['messages']],
                     'context_segment': context['segment'], 'base_digest': digest([members, segments]),
                     'schema_version': SCHEMA_VERSION, 'algorithm_version': ALGORITHM_VERSION,
                     'max_input_bytes': max_input_bytes, 'max_context_bytes': max_context_bytes,

@@ -15,6 +15,7 @@ from .incremental_index import IncrementalIndex, IndexErrorState
 from .indexer import SemanticIndexer
 from .segment_api import segment_nodes, exact_answer
 from .management import AtlasManagement, ManagementError
+from .revision import graph_revision
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 logger = logging.getLogger(__name__)
@@ -102,6 +103,9 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
 
     @app.get("/api/atlas")
     def graph():
+        # Read before materializing: a concurrent commit remains visible to the
+        # next revision poll, even if it happens during this multi-query read.
+        revision = graph_revision(index.source_db, index.path)
         rows = list_stored_conversations(db_path)
         # Genuine committed Assistant save events; repeated sync timestamps are not activity.
         with closing(get_read_connection(db_path)) as connection:
@@ -137,6 +141,7 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
         }] if conversations else []
         return {
             "schemaVersion": 1,
+            "revision": revision,
             "provenance": {"mode": "real", "label": "SQLite · 持久化索引", "description": "已采集原文及已完成的主题索引；只有手动分析才调用模型。完整历史未知。"},
             "categories": categories, "conversations": conversations, "segments": segments,
             "quality": {
@@ -150,6 +155,10 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
                 "completeness": "unknown", "ordering": "not_evaluated",
             },
         }
+
+    @app.get('/api/atlas/revision')
+    def revision():
+        return {'revision': graph_revision(index.source_db, index.path)}
 
     @app.get('/api/atlas/hidden')
     def hidden_conversations():

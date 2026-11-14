@@ -56,8 +56,8 @@ def exact_answer(index, cid, sid, key):
     trustworthy = stored['ordering'] in ('source_time', 'dom_relative') and index.inspect(cid)['status'] == 'ready'
     if trustworthy:
         j = position - 1
-        while j >= 0 and messages[j]['role'] == 'assistant':
-            j -= 1
+        # A preceding Assistant can be a continuation or another branch;
+        # chronology alone does not establish its originating User question.
         while j >= 0 and messages[j]['role'] == 'user':
             users.insert(0, messages[j]); j -= 1
     scope = {m['key']: m for m in members if m['segment_id'] == sid}

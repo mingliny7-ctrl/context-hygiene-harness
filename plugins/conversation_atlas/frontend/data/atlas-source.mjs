@@ -52,6 +52,13 @@ export async function loadAtlas({ mode = 'real', ...options } = {}) {
   return normalizeAtlas(await requestJSON('/api/atlas', options));
 }
 
+export async function atlasChanged(revision, options = {}) {
+  const payload = await requestJSON('/api/atlas/revision', options);
+  if (typeof payload?.revision !== 'string' || !payload.revision)
+    throw new Error('图谱更新标识无效，请检查 Atlas 服务。');
+  return payload.revision !== revision;
+}
+
 export async function loadConversation(conversationId, options = {}) {
   const payload = await requestJSON(`/api/atlas/conversations/${encodeURIComponent(conversationId)}`, options);
   if (payload?.conversationId !== conversationId || !Array.isArray(payload.messages)) throw new Error('原文会话标识与选中节点不一致。');

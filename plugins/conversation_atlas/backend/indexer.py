@@ -26,6 +26,7 @@ contextExcerpt=true的参考消息仅是注明字符范围的真实原文片段�
 只可延续一个open尾段，不能重做其他历史段。每段必须有有价值的Assistant回答引用。
 title简洁表达讨论目标，不用文件路径、内部ID或日志行作默认标题。summary结合User需求与Assistant解释、方案、限制。
 区分用户决定、模型建议、模型声称完成和实际确认；不要把建议或成功口令写成已验证事实。
+连续多条Assistant只表示已观察到的顺序，不证明它们属于同一提问或同一分支；不得补造缺失的User提问或分支关系。
 outcomes只提炼有原文依据的新结论，允许为空；outcome_evidence逐条对应，并仅引用本段pending。
 key_assistant_answers仅选择本段pending中的真实Assistant ID，不生成原文副本。引用之外不编造消息。
 extend的summary可基于旧短摘要增量更新，旧outcomes由Python保留，模型只输出新增outcomes。

@@ -174,8 +174,6 @@ class AtlasManagement:
         users = []
         if stored['ordering'] in ('source_time', 'dom_relative'):
             j = position - 1
-            while j >= 0 and messages[j]['role'] == 'assistant':
-                j -= 1
             while j >= 0 and messages[j]['role'] == 'user':
                 users.insert(0, messages[j]); j -= 1
         pack = lambda m: {k: m[k] for k in ('key', 'role', 'content', 'source_order', 'source_created_at',

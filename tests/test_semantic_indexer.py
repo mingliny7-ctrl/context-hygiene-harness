@@ -243,6 +243,22 @@ def test_modified_question_is_not_presented_as_original_answer_context(index):
         assert answer['answer']['content']==msg(2)['content']
 
 
+def test_consecutive_assistants_do_not_invent_question_association(index):
+    messages = [msg(1), msg(2), {**msg(4), 'content': '另一个独立回复'}]
+    save_observation('A', messages, index.source_db,
+                     observed_order=[m['key'] for m in messages])
+    provider = FakeProvider()
+    with TestClient(create_app(index.source_db, index.path, lambda: provider)) as client:
+        runner = client.app.state.indexer
+        runner.start('A'); assert wait(runner)['status'] == 'completed'
+        segment = index._state('A')[1][0]['segment_id']
+        detail = client.get(f"/api/atlas/answer/A/{segment}/{msg(4)['key']}").json()
+        assert detail['answer']['content'] == '另一个独立回复'
+        assert detail['questions'] == [] and detail['contextStatus'] == 'unconfirmed'
+        bookmark = client.get(f"/api/atlas/bookmarks/A/{msg(4)['key']}/answer").json()
+        assert bookmark['questions'] == [] and bookmark['contextStatus'] == 'unconfirmed'
+
+
 def test_source_change_after_inference_never_automatically_reanalyzes(index):
     seed(index,[1,2]);p=FakeProvider();complete=p.complete
     def source_changes(system,user):

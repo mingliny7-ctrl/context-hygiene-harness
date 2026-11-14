@@ -205,6 +205,27 @@ def test_window_budget_no_truncation_or_full_history_fallback(index):
         index.plan('B', max_input_bytes=5000, max_context_bytes=500)
 
 
+def test_input_accounting_preserves_exact_json_boundary_without_quadratic_encoding(index, monkeypatch):
+    from plugins.conversation_atlas.backend import incremental_index as module
+    messages = [message(n, '\n中文 "quotes" \\ slash 😀' * 80) for n in range(1, 21)]
+    save_observation('A', messages, index.source_db, observed_order=[m['key'] for m in messages])
+    original = module.encoded
+    context = {'segment': None, 'messages': []}
+    limit = len(original({'context': context, 'pending': messages[:8]}).encode()) + 2048
+    serialized_messages = []
+    def measured(value):
+        if isinstance(value, dict) and 'pending' in value and 'context' in value:
+            serialized_messages.append(len(value['pending']))
+        return original(value)
+    monkeypatch.setattr(module, 'encoded', measured)
+    plan = index.plan('A', max_input_bytes=limit, max_context_bytes=1000, complete_turns=True)
+    assert plan['pending'] == messages[:8]
+    assert plan['input_byte_upper_bound'] == limit
+    assert sum(serialized_messages) <= len(messages)
+    assert index.plan('A', max_input_bytes=limit - 1, max_context_bytes=1000,
+                      complete_turns=True)['pending'] == messages[:6]
+
+
 def test_backup_migration_module5_compatibility_and_source_unchanged(index):
     # Existing V5 cache is preserved byte-for-byte at the row level.
     other = index.path.with_name('legacy.db')
