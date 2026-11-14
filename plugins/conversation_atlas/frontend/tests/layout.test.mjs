@@ -18,9 +18,10 @@ test('entry from every sky direction reaches the same anchor without all history
   const sky=computeLayout(data,{}, {width:1100,height:520});
   for(const entry of sky.nodes){
     const focused=computeLayout(data,{conversationId:entry.id},{width:1100,height:520});
-    const anchor=focused.nodes.find(n=>n.id===entry.id);
-    assert.equal(anchor.x,352); assert.equal(anchor.y,260);
-    assert.equal(focused.nodes.filter(n=>n.kind==='conversation').length,1);
+    assert.equal(focused.core.conversationId,entry.id);
+    assert.equal(focused.core.x,144); assert.equal(focused.core.y,260);
+    assert.equal(focused.nodes.filter(n=>n.kind==='conversation').length,0);
+    assert.ok(focused.edges.every(edge=>edge.from==='atlas-core'));
     assert.deepEqual(computeLayout(data,{}, {width:1100,height:520}),sky);
   }
 });
@@ -29,14 +30,35 @@ test('responsive focus keeps short topic sets within the scene and uses trusted 
     const result=computeLayout({...data,segments:[...data.segments].reverse()},{conversationId:'c19'},{width,height:500});
     assert.deepEqual(result.nodes.filter(n=>n.kind==='segment').map(n=>n.id),['s0','s1','s2']);
     for(const n of result.nodes){assert.ok(n.x-n.width/2>=0);assert.ok(n.x+n.width/2<=result.width);assert.ok(n.y-n.height/2>=0);assert.ok(n.y+n.height/2<=result.height);}
-    assert.ok(result.nodes[0].x<result.nodes[1].x);
+    assert.ok(result.core.x<result.nodes[0].x);
   }
 });
 test('many segments use a vertical scene without node collisions',()=>{
   const segments=Array.from({length:20},(_,i)=>({id:`s${i}`,conversationId:'c19',order:i}));
   const result=computeLayout({...data,segments},{conversationId:'c19'},{width:800,height:500});
-  assert.ok(result.height>500); const leaves=result.nodes.slice(1);
+  assert.ok(result.height>500); const leaves=result.nodes;
   for(let i=1;i<leaves.length;i++)assert.ok(leaves[i].y-leaves[i-1].y>leaves[i].height);
+});
+
+test('source-backed blocks expand to the right of their selected topic with stable navigation IDs',()=>{
+  const segments=[{...data.segments[0],segmentId:'stored:s0',subtopics:[
+    {block_id:'b1',title:'资源管理',summary:'真实摘要',message_ids:['a1'],key_assistant_answers:[{message_id:'a1',reason:'解释'}]},
+    {block_id:'b2',title:'上下文协议',summary:'另一摘要',message_ids:['a2'],key_assistant_answers:[{message_id:'a2',reason:'例子'}]},
+  ]},...data.segments.slice(1)];
+  const result=computeLayout({...data,segments},{conversationId:'c19',selectedId:'s0'},{width:560,height:500});
+  const topics=result.nodes.filter(n=>n.kind==='segment'), blocks=result.nodes.filter(n=>n.kind==='block');
+  assert.equal(topics.length,3); assert.equal(blocks.length,2);
+  assert.equal(result.edges.filter(e=>e.from==='atlas-core').length,3);
+  assert.ok(blocks.every(n=>n.parentId==='s0' && n.x>topics[0].x));
+  assert.deepEqual(blocks[0].entity.keyAssistantAnswers,[{message_id:'a1',reason:'解释'}]);
+  for(const n of result.nodes) {
+    assert.ok(n.x-n.width/2>=0 && n.x+n.width/2<=result.width);
+    assert.ok(n.y-n.height/2>=0 && n.y+n.height/2<=result.height);
+  }
+  const changed=structuredClone(segments); changed[0].subtopics[0].title='新标题';
+  const renamed=computeLayout({...data,segments:changed},{conversationId:'c19',selectedId:blocks[0].id},{width:560,height:500});
+  assert.deepEqual(renamed.nodes.filter(n=>n.kind==='block').map(n=>n.id),blocks.map(n=>n.id));
+  assert.equal(computeLayout(data,{conversationId:'c19',selectedId:'s0'}).nodes.filter(n=>n.kind==='block').length,0);
 });
 test('bezier keeps one finite morphable cubic including collapsed endpoints',()=>{
   assert.equal(bezierPath({x:0,y:0,radius:20,kind:'core'},{x:100,y:0,width:40,height:40}),'M 20 0 C 50 0, 50 0, 80 0');
@@ -57,6 +79,6 @@ test('home planets include separate label bounds, stable asymmetric pockets and 
     assert.ok(sky.edges.every(e=>! /NaN|Infinity/.test(e.path) && e.path.includes(' C ')));
     assert.deepEqual(computeLayout(data,{}, {width,height}),sky);
     const focused=computeLayout(data,{conversationId:'c19'},{width,height});
-    assert.equal(focused.nodes[0].planet,undefined);
+    assert.equal(focused.nodes.filter(n=>n.kind==='conversation').length,0);
   }
 });

@@ -154,3 +154,21 @@
   .connection.gravity-line,.overview-conversation .node-spark {animation:none}
   .gravity-flow {display:none!important;animation:none}
 }
+
+/* Focused planet is the Conversation; topics and concepts branch directly right. */
+.atlas-app.expanded .core-label.conversation-label{opacity:1;max-width:240px;white-space:normal;pointer-events:auto}
+.conversation-label .core-eyebrow{display:none}
+.conversation-label #core-title{font-size:16px;line-height:1.6;margin:0;overflow-wrap:anywhere}
+.planet-actions{display:flex;justify-content:center;gap:14px;margin-top:12px}
+.planet-actions button{font-size:11px;color:#b8c6a8;border-bottom:1px solid #97ab7b44;padding:4px 0;white-space:nowrap}
+.graph-node.block{border-radius:20px;background:#17211c;border-color:#a1c9b43d}
+.graph-node.block .node-title{font-size:12px}
+.graph-node.block.selected{background:#25352b;border-color:#bed6b779}
+.graph-node.segment .node-title{font-size:12px}
+.manage-entry{padding:8px 11px;border:1px solid #b0bca639;border-radius:8px;color:#ccd5bd;background:#b5c6a30b}
+.topic-actions{display:flex;gap:12px;margin:10px 0 18px}
+.topic-actions .quiet-button,.collection-dialog .quiet-button{display:inline-flex}
+.refine-button{display:inline-flex;padding:10px 14px;border-radius:9px;background:#cad4b6;color:#182119;font-size:12px}
+.refine-button:disabled{opacity:.55}
+.collection-dialog .reading-limitation{font-size:13px;line-height:1.85}
+@media(max-width:760px){.conversation-label #core-title{font-size:13px}.atlas-app.expanded .core-label.conversation-label{max-width:190px}.planet-actions{gap:10px}.planet-actions button{font-size:10px}}

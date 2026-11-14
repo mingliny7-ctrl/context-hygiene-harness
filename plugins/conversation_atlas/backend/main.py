@@ -12,10 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from shared.conversation_store.store import list_stored_conversations, read_stored_conversation
 from shared.conversation_store.database import get_read_connection
 from .incremental_index import IncrementalIndex, IndexErrorState
-from .indexer import SemanticIndexer
+from .indexer import SemanticIndexer, ExecutionLock
 from .segment_api import segment_nodes, exact_answer
 from .management import AtlasManagement, ManagementError
 from .revision import graph_revision
+from .concept_refinement import ConceptRefiner
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 logger = logging.getLogger(__name__)
@@ -68,14 +69,17 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
                provider_factory=None, budget=None) -> FastAPI:
     index = IncrementalIndex(db_path, analysis_db_path)
     indexer = SemanticIndexer(index, provider_factory, budget)
+    refiner = ConceptRefiner(index, provider_factory, initialize=indexer.initialize)
     management = AtlasManagement(index.source_db, index.path)
     @asynccontextmanager
     async def lifespan(app):
         yield  # No migrations, model configuration or inference on startup.
         indexer.close()
+        refiner.close()
     app = FastAPI(title="Conversation Atlas · read-only Store integration", lifespan=lifespan)
     app.state.indexer = indexer
     app.state.management = management
+    app.state.refiner = refiner
 
     def management_action(request: Request):
         origin = request.headers.get('origin')
@@ -112,23 +116,26 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
             installed = connection.execute("SELECT 1 FROM sqlite_master WHERE name='collector_save_state'").fetchone()
             activity = dict(connection.execute('SELECT conversation_id,saved_at FROM collector_save_state')) if installed else {}
         hidden = management.hidden_ids()
+        hidden_topics = management.hidden_segment_ids()
         valid_rows = [row for row in rows if isinstance(row["conversation_id"], str) and row["conversation_id"].strip() and row['conversation_id'] not in hidden]
         conversations = [conversation_node(row) for row in valid_rows]
         segments = []
         for node in conversations:
             node['lastContentSavedAt'] = stored_time(activity.get(node['id']))
             node['activitySource'] = 'committed_assistant_save' if node['lastContentSavedAt'] else 'unavailable'
-            leaves = segment_nodes(index, node['id'])
+            all_leaves = segment_nodes(index, node['id'])
+            leaves = [s for s in all_leaves if (node['id'], s['segmentId']) not in hidden_topics]
             check = index.inspect(node['id'])
             node['indexState'] = check
             node['segmentCount'] = len(leaves)
+            node['hiddenSegmentCount'] = len(all_leaves) - len(leaves)
             if leaves:
                 node['segmentStatus'] = 'indexed'
                 node.update(summary=leaves[0]['summary'], summarySource='first_segment_summary')
             segments.extend(leaves)
         count = sum(row["message_count"] for row in valid_rows)
         stored_count = sum(row['message_count'] for row in rows)
-        stored_segment_count = len(segments) + sum(len(segment_nodes(index, row['conversation_id'])) for row in rows if row['conversation_id'] in hidden)
+        stored_segment_count = len(segments) + len(hidden_topics) + sum(len([s for s in segment_nodes(index, row['conversation_id']) if (row['conversation_id'], s['segmentId']) not in hidden_topics]) for row in rows if row['conversation_id'] in hidden)
         dates = [node["createdAt"] for node in conversations if node["createdAt"]]
         updates = [node["updatedAt"] for node in conversations if node["updatedAt"]]
         categories = [{
@@ -162,7 +169,34 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
 
     @app.get('/api/atlas/hidden')
     def hidden_conversations():
-        return {'conversations': management.hidden()}
+        return {'conversations': management.hidden(), 'topics': management.hidden_segments()}
+
+    @app.post('/api/atlas/topics/{conversation_id}/{segment_id}/hide')
+    def hide_topic(conversation_id: str, segment_id: str, request: Request):
+        management_action(request)
+        return managed(lambda: management.set_segment_hidden(conversation_id, segment_id, True))
+
+    @app.post('/api/atlas/topics/{conversation_id}/{segment_id}/restore')
+    def restore_topic(conversation_id: str, segment_id: str, request: Request):
+        management_action(request)
+        return managed(lambda: management.set_segment_hidden(conversation_id, segment_id, False))
+
+    @app.get('/api/atlas/concepts/{conversation_id}/{segment_id}')
+    def concepts_state(conversation_id: str, segment_id: str):
+        try:
+            return refiner.preview(conversation_id, segment_id)
+        except IndexErrorState as error:
+            raise HTTPException(409, detail={'code': str(error)}) from error
+
+    @app.post('/api/atlas/concepts/{conversation_id}/{segment_id}', status_code=202)
+    def refine_concepts(conversation_id: str, segment_id: str, request: Request):
+        origin = request.headers.get('origin')
+        if request.headers.get('x-atlas-action') != 'manual-analysis' or (origin and origin != str(request.base_url).rstrip('/')):
+            raise HTTPException(403, '仅接受 Atlas 页面明确发起的手动细分。')
+        try:
+            return refiner.start(conversation_id, segment_id)
+        except IndexErrorState as error:
+            raise HTTPException(409, detail={'code': str(error)}) from error
 
     @app.post('/api/atlas/conversations/{conversation_id}/hide')
     def hide_conversation(conversation_id: str, request: Request):
@@ -177,9 +211,14 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
     @app.delete('/api/atlas/conversations/{conversation_id}')
     def delete_conversation(conversation_id: str, request: Request):
         management_action(request)
-        if (indexer.latest(conversation_id) or {}).get('status') in ('queued', 'running'):
+        try:
+            lock = ExecutionLock(index.path)
+        except IndexErrorState:
             raise HTTPException(409, '该对话正在分析，结束后才能删除。')
-        return managed(lambda: management.delete(conversation_id))
+        try:
+            return managed(lambda: management.delete(conversation_id))
+        finally:
+            lock.close()
 
     @app.get('/api/atlas/tombstones')
     def deleted_conversations():

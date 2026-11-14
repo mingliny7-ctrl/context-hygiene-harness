@@ -24,6 +24,7 @@ def segment_nodes(index, cid):
                        'categoryId': 'atlas:unclassified', 'title': a['title'], 'summary': a['summary'],
                        'keywords': a['keywords'], 'outcomes': a['outcomes'], 'keyAssistantAnswers': answers,
                        'subtopics': a.get('subtopics', []),
+                       'conceptRefinement': a.get('concept_refinement'),
                        'order': order, 'revision': s['revision'], 'messageCount': len(scope),
                        'messageRange': {'start': s['start_key'], 'end': s['end_key']},
                        'messageIndexRange': {'start': min((m['position'] for m in scope), default=0) + 1,

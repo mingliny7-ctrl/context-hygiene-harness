@@ -1,5 +1,7 @@
 # Atlas 优化清单与验证断点
 
+后续星球层级、概念细分与主题管理的实现和剩余验收见 [层级验收断点](atlas-hierarchy-checkpoint.md)。
+
 本轮起点：`f305c63`，分支 `feat/conversation-atlas-prototype`。按优先级执行，关键节点由用户检查真实页面。本轮没有模型调用、数据库迁移或历史数据清理。
 
 ## 优先级与执行状态

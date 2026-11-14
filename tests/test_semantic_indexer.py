@@ -322,3 +322,109 @@ def test_recent_activity_does_not_follow_duplicate_sync(index):
         after=client.get('/api/atlas').json()['conversations'][0]['lastContentSavedAt']
         assert before==after
         assert client.get('/api/atlas').json()['conversations'][0]['activitySource']=='committed_assistant_save'
+
+
+def test_refined_topic_extension_preserves_blocks_without_resending_them(index):
+    from plugins.conversation_atlas.backend.concept_refinement import ConceptRefiner
+    from test_concept_refinement import Provider
+    from plugins.conversation_atlas.backend.incremental_index import encoded
+    seed(index, [1, 2])
+    provider = FakeProvider()
+    runner = SemanticIndexer(index, lambda: provider)
+    refiner = None
+    try:
+        runner.start('A')
+        assert wait(runner)['status'] == 'completed'
+        sid = index.read_segments('A')['segments'][0]['segment_id']
+        refiner = ConceptRefiner(index, lambda: Provider(), initialize=runner.initialize)
+        refiner.start('A', sid)
+        refiner.future.result(timeout=5)
+        assert refiner.status('A', sid)['status'] == 'completed'
+        old_analysis = index.read_segments('A')['segments'][0]['analysis']
+        seed(index, [1, 2, 3, 4])
+        runner.start('A')
+        assert wait(runner)['status'] == 'completed'
+        sent = provider.calls[-1]
+        assert len(encoded(sent['context']).encode()) <= runner.budget.context
+        assert 'subtopics' not in sent['context']['segment']['analysis']
+        assert 'concept_refinement' not in sent['context']['segment']['analysis']
+        assert [m['key'] for m in sent['pending']] == [msg(3)['key'], msg(4)['key']]
+        result = index.read_segments('A')['segments'][0]
+        assert result['segment_id'] == sid
+        assert result['analysis']['subtopics'] == old_analysis['subtopics']
+        assert index.inspect('A')['appended'] == []
+        assert len(index.inspect('A')['unchanged']) == 4
+    finally:
+        if refiner:
+            refiner.close()
+        runner.close()
+
+
+def test_distinct_concepts_sharing_source_have_unique_stable_ids(index):
+    from plugins.conversation_atlas.backend.indexer import validate_output
+    index.initialize()
+    seed(index, [1, 2])
+    plan = index.plan('A', complete_turns=True)
+    job = index.prepare_batch(plan, manual=True)
+    response = FakeProvider().complete('', json.dumps({'pending': plan['pending'], 'context': plan['context']}))
+    output = json.loads(response['content'])
+    analysis = output['segments'][0]['analysis']
+    analysis['subtopics'] = [
+        {'block_id': None, 'title': title, 'summary': '同一回答中的独立概念',
+         'message_ids': [msg(1)['key'], msg(2)['key']],
+         'key_assistant_answers': [{'message_id': msg(2)['key'], 'reason': '原始回答'}]}
+        for title in ('资源释放', '上下文协议')]
+    writes = validate_output(json.dumps(output), plan, job['batch_id'])
+    block_ids = [b['block_id'] for b in writes[0]['analysis']['subtopics']]
+    assert len(set(block_ids)) == 2
+    assert validate_output(json.dumps(output), plan, job['batch_id']) == writes
+    receipt = index.commit_batch(job['batch_id'], writes, model='test')
+    assert index.commit_batch(job['batch_id'], writes, model='test') == receipt
+
+
+def test_topic_can_accumulate_concepts_beyond_one_request_limit(index):
+    from plugins.conversation_atlas.backend.indexer import validate_output
+    index.initialize()
+    seed(index, [1, 2])
+    plan = index.plan('A', complete_turns=True)
+    job = index.prepare_batch(plan, manual=True)
+    response = FakeProvider().complete('', json.dumps({'pending': plan['pending'], 'context': plan['context']}))
+    output = json.loads(response['content'])
+    output['segments'][0]['analysis']['subtopics'] = [
+        {'block_id': None, 'title': f'独立概念 {number}', 'summary': '真实来源中的独立内容',
+         'message_ids': [msg(1)['key'], msg(2)['key']],
+         'key_assistant_answers': [{'message_id': msg(2)['key'], 'reason': '原始回答'}]}
+        for number in range(8)]
+    writes = validate_output(json.dumps(output), plan, job['batch_id'])
+    index.commit_batch(job['batch_id'], writes, model='test')
+    old_blocks = index.read_segments('A')['segments'][0]['analysis']['subtopics']
+    seed(index, [1, 2, 3, 4])
+    provider = FakeProvider()
+    complete = provider.complete
+    def two_more_concepts(system, user):
+        response = complete(system, user)
+        value = json.loads(response['content'])
+        value['segments'][0]['analysis']['subtopics'] = [
+            {'block_id': None, 'title': title, 'summary': '新增来源中的独立内容',
+             'message_ids': [msg(3)['key'], msg(4)['key']],
+             'key_assistant_answers': [{'message_id': msg(4)['key'], 'reason': '新增回答'}]}
+            for title in ('新增机制', '新增限制')]
+        response['content'] = json.dumps(value)
+        return response
+    provider.complete = two_more_concepts
+    runner = SemanticIndexer(index, lambda: provider)
+    try:
+        runner.start('A')
+        assert wait(runner)['status'] == 'completed'
+        blocks = index.read_segments('A')['segments'][0]['analysis']['subtopics']
+        assert len(blocks) == 10
+        assert blocks[:8] == old_blocks
+        assert len({block['block_id'] for block in blocks}) == 10
+        assert provider.calls[0]['schema']['$defs']['SegmentAnalysis']['properties']['subtopics']['maxItems'] == 8
+        assert index.inspect('A')['appended'] == []
+        too_many = json.loads(json.dumps(output))
+        too_many['segments'][0]['analysis']['subtopics'].append(too_many['segments'][0]['analysis']['subtopics'][0])
+        with pytest.raises(IndexErrorState, match='TOO_MANY_CONTENT_BLOCKS'):
+            validate_output(json.dumps(too_many), plan, job['batch_id'])
+    finally:
+        runner.close()

@@ -3,6 +3,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from .analysis import SemanticAnalysis, KeyAssistantAnswer
 
 
+class ConceptRefinement(BaseModel):
+    """Local completion receipt; no source bodies, credentials, or new tables."""
+    model_config = ConfigDict(extra='forbid', strict=True)
+    source_digest: str
+    model: str
+    prompt_version: str
+    analyzed_at: str
+    atomic: bool
+    requests: int = Field(default=1, ge=1, le=1)
+    usage: dict = Field(default_factory=dict)
+
+
 class ContentBlock(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     block_id: str | None = Field(default=None, max_length=128)
@@ -13,7 +25,9 @@ class ContentBlock(BaseModel):
 
 
 class SegmentAnalysis(SemanticAnalysis):
-    subtopics: list[ContentBlock] = Field(default_factory=list, max_length=8)
+    # A persisted topic can accumulate valid blocks across multiple batches.
+    subtopics: list[ContentBlock] = Field(default_factory=list)
+    concept_refinement: ConceptRefinement | None = None
 
 
 def validate_blocks(analysis, messages):

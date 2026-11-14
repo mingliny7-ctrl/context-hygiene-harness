@@ -5,12 +5,25 @@ const size = {
   category: { width: 140, height: 90, radius: 45 },
   conversation: { width: 220, height: 64, radius: 20 },
   segment: { width: 200, height: 64, radius: 18 },
+  block: { width: 190, height: 70, radius: 18 },
 };
 
 const finite = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const dateValue = value => Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
 const chronological = (left, right) => dateValue(left.createdAt) - dateValue(right.createdAt)
   || String(left.id).localeCompare(String(right.id), "en");
+
+/** Navigation identity depends on persistent source IDs, never generated titles. */
+export const contentBlockId = (segmentId, blockId) => `atlas:block:${encodeURIComponent(segmentId)}:${encodeURIComponent(blockId)}`;
+
+export function contentBlocks(segment) {
+  return (segment?.subtopics || []).filter(block => typeof block.block_id === 'string' && block.block_id)
+    .map((block, order) => ({...block, id: contentBlockId(segment.id, block.block_id), kind: 'block',
+      conversationId: segment.conversationId, segmentId: segment.segmentId,
+      segmentNodeId: segment.id, categoryId: segment.categoryId,
+      keyAssistantAnswers: block.key_assistant_answers || [],
+      messageCount: block.message_ids?.length || 0, order: order + 1}));
+}
 
 function node(kind, entity, x, y, parentId, dimensions = size[kind]) {
   return { id: entity.id, kind, entity, x, y, ...dimensions, opacity: 1, parentId };
@@ -93,16 +106,29 @@ export function computeLayout(data = {}, state = {}, viewport = {}) {
   if (!selected) return overview(conversations, width, height);
   const leaves = (data.segments || []).filter(item => item.conversationId === selected.id)
     .sort((a,b) => finite(a.order,0) - finite(b.order,0) || chronological(a,b));
-  const sceneWidth = Math.max(560, width);
+  const selectedSegment = leaves.find(item => item.id === state.segmentId || item.id === state.selectedId)
+    || leaves.find(item => contentBlocks(item).some(block => block.id === state.selectedId || block.block_id === state.blockId));
+  const blocks = contentBlocks(selectedSegment);
+  const sceneWidth = Math.max(blocks.length ? 800 : 560, width);
   const gap = 94;
-  const sceneHeight = Math.max(height, leaves.length * gap + 48);
-  const centerY = sceneHeight / 2;
-  const core = { x: 56, y: centerY, radius: 31, opacity: .8 };
-  const anchor = node('conversation', selected, sceneWidth * .32, centerY, CORE_ID,
-    { width: Math.min(208, sceneWidth * .29), height: 72, radius: 24 });
-  const nodes = [anchor, ...leaves.map((item,i) => node('segment', item, sceneWidth * .76,
-    centerY + (i - (leaves.length - 1)/2) * gap, anchor.id,
-    { width: Math.min(210, sceneWidth * .32), height: 70, radius: 22 }))];
+  const selectedY = Math.max(0, leaves.indexOf(selectedSegment)) * gap;
+  const topicY = leaves.map((_, i) => i * gap);
+  const blockY = blocks.map((_, i) => selectedY + (i - (blocks.length - 1) / 2) * gap);
+  const low = Math.min(0, ...topicY, ...blockY) - 60;
+  const high = Math.max(0, ...topicY, ...blockY) + 60;
+  const sceneHeight = Math.max(height, high - low);
+  const shift = (sceneHeight - (high - low)) / 2 - low;
+  const centerY = leaves.length ? (topicY[0] + topicY.at(-1)) / 2 + shift : sceneHeight / 2;
+  // The focused particle planet owns the Conversation identity. There is no
+  // duplicate rectangular Conversation node between the planet and its topics.
+  const core = { id: CORE_ID, kind: 'conversation', conversationId: selected.id,
+    entity: selected, x: Math.min(144, sceneWidth * .2), y: centerY,
+    radius: 48, opacity: 1 };
+  const topicX = sceneWidth * (blocks.length ? .48 : .67);
+  const nodes = leaves.map((item,i) => node('segment', item, topicX, topicY[i] + shift, CORE_ID,
+    { width: Math.min(210, sceneWidth * .32), height: 70, radius: 22 }));
+  nodes.push(...blocks.map((item, i) => node('block', item, sceneWidth * .83,
+    blockY[i] + shift, selectedSegment.id, {width: 190, height: 70, radius: 18})));
   return { core, nodes, edges: edgesFor(core,nodes), width: sceneWidth,
     height: sceneHeight, requiredHeight: sceneHeight };
 }

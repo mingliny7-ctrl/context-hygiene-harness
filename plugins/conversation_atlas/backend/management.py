@@ -2,6 +2,7 @@
 
 from contextlib import closing
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import re
 import sqlite3
@@ -13,7 +14,7 @@ from shared.conversation_store.store import read_stored_conversation
 NATIVE_ASSISTANT = re.compile(r'^chatgpt:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:assistant$')
 DERIVED_TABLES = ('conversation_analysis', 'atlas_index_calls', 'atlas_index_runs',
                   'atlas_index_batches', 'atlas_indexed_messages', 'atlas_segments',
-                  'atlas_bookmarks', 'atlas_conversation_visibility')
+                  'atlas_bookmarks', 'atlas_conversation_visibility', 'atlas_segment_visibility')
 SOURCE_TABLES = ('conversations', 'messages', 'collector_save_state',
                  'conversation_order_evidence', 'message_presentations', 'collector_tombstones')
 
@@ -83,7 +84,7 @@ class AtlasManagement:
         self.index_db.parent.mkdir(parents=True, exist_ok=True)
         if self.index_db.is_file():
             with closing(self._read()) as reader:
-                if all(self._has(reader, table) for table in ('atlas_bookmarks', 'atlas_conversation_visibility')):
+                if all(self._has(reader, table) for table in ('atlas_bookmarks', 'atlas_conversation_visibility', 'atlas_segment_visibility')):
                     return None
                 backup = self.index_db.with_name(self.index_db.stem + '.management-backup-' + uuid.uuid4().hex + '.db')
                 with sqlite3.connect(backup) as destination:
@@ -97,6 +98,9 @@ class AtlasManagement:
             connection.execute('''CREATE TABLE IF NOT EXISTS atlas_bookmarks (
                 conversation_id TEXT NOT NULL, message_key TEXT NOT NULL,
                 created_at TEXT NOT NULL, PRIMARY KEY(conversation_id,message_key))''')
+            connection.execute('''CREATE TABLE IF NOT EXISTS atlas_segment_visibility (
+                conversation_id TEXT NOT NULL, segment_id TEXT NOT NULL,
+                hidden_at TEXT NOT NULL, PRIMARY KEY(conversation_id,segment_id))''')
         return backup
 
     def hidden_ids(self):
@@ -125,6 +129,66 @@ class AtlasManagement:
             else:
                 connection.execute('DELETE FROM atlas_conversation_visibility WHERE conversation_id=?', (cid,))
         return {'conversationId': cid, 'hidden': hidden}
+
+    def hidden_segment_ids(self, cid=None):
+        """Return IDs for one Conversation, or (Conversation, Segment) pairs globally."""
+        connection = self._read()
+        if connection is None:
+            return set()
+        with closing(connection):
+            if not self._has(connection, 'atlas_segment_visibility'):
+                return set()
+            if cid is not None:
+                return {row[0] for row in connection.execute(
+                    'SELECT segment_id FROM atlas_segment_visibility WHERE conversation_id=?', (cid,))}
+            return {tuple(row) for row in connection.execute(
+                'SELECT conversation_id,segment_id FROM atlas_segment_visibility')}
+
+    def hidden_segments(self):
+        connection = self._read()
+        if connection is None:
+            return []
+        with closing(connection):
+            if not all(self._has(connection, table) for table in ('atlas_segment_visibility', 'atlas_segments')):
+                return []
+            rows = connection.execute('''SELECT v.conversation_id,v.segment_id,v.hidden_at,s.analysis_json
+                FROM atlas_segment_visibility v JOIN atlas_segments s
+                ON s.conversation_id=v.conversation_id AND s.segment_id=v.segment_id
+                ORDER BY v.hidden_at DESC,v.conversation_id,v.segment_id''').fetchall()
+        result = []
+        titles = {}
+        for cid, sid, hidden_at, analysis in rows:
+            if cid not in titles:
+                stored = read_stored_conversation(cid, self.source_db)
+                titles[cid] = (stored.get('original_title') or '原始标题待重新采集') if stored else None
+            if titles[cid] is not None:
+                result.append({'conversationId': cid, 'segmentId': sid,
+                               'title': json.loads(analysis)['title'],
+                               'conversationTitle': titles[cid], 'hiddenAt': hidden_at})
+        return result
+
+    def set_segment_hidden(self, cid, sid, hidden):
+        """Visibility only: preserve analysis, coverage, and original messages."""
+        if read_stored_conversation(cid, self.source_db) is None:
+            raise ManagementError('NOT_FOUND', '会话不存在。')
+        reader = self._read()
+        if reader is None:
+            raise ManagementError('NOT_FOUND', '主题不存在。')
+        with closing(reader):
+            if (not self._has(reader, 'atlas_segments') or not reader.execute(
+                    'SELECT 1 FROM atlas_segments WHERE conversation_id=? AND segment_id=?', (cid, sid)).fetchone()):
+                raise ManagementError('NOT_FOUND', '主题不存在。')
+        self.initialize()
+        with sqlite3.connect(self.index_db, timeout=15) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            if not connection.execute('SELECT 1 FROM atlas_segments WHERE conversation_id=? AND segment_id=?', (cid, sid)).fetchone():
+                raise ManagementError('NOT_FOUND', '主题已不存在。')
+            if hidden:
+                connection.execute('INSERT OR IGNORE INTO atlas_segment_visibility VALUES (?,?,?)',
+                                   (cid, sid, datetime.now(timezone.utc).isoformat()))
+            else:
+                connection.execute('DELETE FROM atlas_segment_visibility WHERE conversation_id=? AND segment_id=?', (cid, sid))
+        return {'conversationId': cid, 'segmentId': sid, 'hidden': hidden}
 
     def _assistant(self, cid, key):
         if not NATIVE_ASSISTANT.fullmatch(key):

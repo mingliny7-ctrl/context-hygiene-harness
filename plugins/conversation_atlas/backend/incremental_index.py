@@ -200,10 +200,14 @@ class IncrementalIndex:
         if [m['key'] for m in messages if m['key'] in known] != [m['key'] for m in members]:
             raise IndexErrorState('SOURCE_CHANGED')
         tail = next((s for s in segments if members and s['segment_id'] == members[-1]['segment_id']), None)
+        tail_analysis = json.loads(tail['analysis_json']) if tail else None
         context = {'segment': None, 'messages': []}
         if tail and status['appended']:
             context['segment'] = {k: tail[k] for k in ('segment_id', 'revision', 'theme_state', 'topic_state', 'start_key', 'end_key')}
-            context['segment']['analysis'] = json.loads(tail['analysis_json'])
+            # Concept navigation and its local receipt are not model context;
+            # retain them separately for lossless extension at commit time.
+            context['segment']['analysis'] = {k: v for k, v in tail_analysis.items()
+                                               if k not in ('subtopics', 'concept_refinement')}
             if len(encoded(context).encode()) > max_context_bytes:
                 raise IndexErrorState('CONTEXT_TOO_LARGE')
             for old in reversed(members):
@@ -264,6 +268,7 @@ class IncrementalIndex:
                     'max_input_bytes': max_input_bytes, 'max_context_bytes': max_context_bytes,
                     'complete_turns': complete_turns, 'through_key': through_key, 'context_excerpt': context_excerpt}
         return {'conversation_id': cid, 'context': context, 'pending': pending, 'manifest': manifest,
+                'tail_analysis': tail_analysis,
                 'input_byte_upper_bound': len(encoded({'context': context, 'pending': pending}).encode()) + 2048,
                 'remaining_count': len(status['appended']) - len(pending)}
 
@@ -318,6 +323,8 @@ class IncrementalIndex:
         for update in normalized:
             if not update['analysis']['subtopics']:
                 update['analysis'].pop('subtopics')  # Preserve pre-extension idempotency receipts.
+            if update['analysis']['concept_refinement'] is None:
+                update['analysis'].pop('concept_refinement')
         result_digest = digest({'updates': normalized, 'model': model, 'prompt_version': prompt_version})
         job = self.batch(batch_id)
         if job is None:

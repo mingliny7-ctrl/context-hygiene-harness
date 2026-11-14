@@ -116,6 +116,45 @@ def test_idempotent_commit_rejects_different_result_and_duplicate_prepare(index)
     assert index.read_segments('A')['segments'][0]['revision'] == 1
 
 
+def test_completed_legacy_batch_replay_ignores_absent_refinement_receipt(index):
+    from plugins.conversation_atlas.backend.incremental_index import digest, PROMPT_VERSION
+    seed(index, [1, 2])
+    job = index.prepare_batch(index.plan('A'), manual=True)
+    result = update([1, 2])
+    receipt = index.commit_batch(job['batch_id'], [result], model='test')
+    # A pre-refinement release never serialized this optional local metadata.
+    legacy_digest = digest({'updates': [result], 'model': 'test', 'prompt_version': PROMPT_VERSION})
+    with sqlite3.connect(index.path) as connection:
+        connection.execute('UPDATE atlas_index_batches SET result_digest=? WHERE batch_id=?',
+                           (legacy_digest, job['batch_id']))
+    assert index.commit_batch(job['batch_id'], [result], model='test') == receipt
+
+
+def test_refined_concepts_stay_local_and_do_not_exhaust_incremental_context(index):
+    from plugins.conversation_atlas.backend.incremental_index import encoded
+    seed(index, [1, 2])
+    result = update([1, 2])
+    result['analysis']['subtopics'] = [
+        {'block_id': f'block:{number}', 'title': title, 'summary': '概念解释' * 400,
+         'message_ids': result['message_ids'],
+         'key_assistant_answers': result['analysis']['key_assistant_answers']}
+        for number, title in enumerate(('资源释放', '上下文协议'))]
+    result['analysis']['concept_refinement'] = {
+        'source_digest': 'test-digest', 'model': 'test', 'prompt_version': 'test',
+        'analyzed_at': '2026-11-14T00:00:00Z', 'atomic': False, 'requests': 1, 'usage': {}}
+    job = index.prepare_batch(index.plan('A'), manual=True)
+    index.commit_batch(job['batch_id'], [result], model='test')
+    seed(index, [1, 2, 3, 4])
+    plan = index.plan('A', max_context_bytes=4000)
+    assert len(encoded(plan['context']).encode()) <= 4000
+    assert 'subtopics' not in plan['context']['segment']['analysis']
+    assert 'concept_refinement' not in plan['context']['segment']['analysis']
+    assert plan['tail_analysis']['subtopics'] == result['analysis']['subtopics']
+    assert plan['tail_analysis']['concept_refinement'] == result['analysis']['concept_refinement']
+    assert [m['key'] for m in plan['pending']] == [message(3)['key'], message(4)['key']]
+    assert index.prepare_batch(plan, manual=True)['created']
+
+
 def test_actual_new_process_restores_checkpoint_and_only_failed_tail_remains(index):
     seed(index, [1, 2]); save(index, [1, 2])
     seed(index, [1, 2, 3, 4])

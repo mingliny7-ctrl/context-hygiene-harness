@@ -57,7 +57,7 @@ def test_original_title_survives_sync_and_segment_title_stays_separate(tmp_path,
     message = {'key': 'native-user', 'role': 'user', 'content': '真实问题'}
     save_observation('real-id', [message], path, original_title='GPT账号协作方案')
     save_observation('real-id', [message], path)  # An old client cannot erase a verified title.
-    fake_segment = {'id': 'segment-1', 'title': '双账号协作续接', 'summary': '主题摘要'}
+    fake_segment = {'id': 'segment-1', 'segmentId': 'stored-segment-1', 'title': '双账号协作续接', 'summary': '主题摘要'}
     monkeypatch.setattr('plugins.conversation_atlas.backend.main.segment_nodes',
                         lambda index, cid: [fake_segment] if cid == 'real-id' else [])
     with TestClient(create_app(path)) as client:
