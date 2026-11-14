@@ -35,7 +35,7 @@ def services(root=ROOT):
     return (
         Service('Collector',18000,'app.main:app',root/'plugins/context_hygiene/backend',
                 'Context Harness Conversation Collector','/health',('/sync','/conversations/{conversation_id}/status')),
-        Service('Atlas',4173,'plugins.conversation_atlas.backend.main:app',root,
+        Service('Atlas',14173,'plugins.conversation_atlas.backend.main:app',root,
                 'Conversation Atlas · read-only Store integration','/api/atlas',('/api/atlas','/api/atlas/conversations/{conversation_id}')),
     )
 
@@ -79,7 +79,7 @@ def failure_reason(path, offset):
             ('database is locked','数据库被其他操作占用'),
             ('unable to open database file','无法打开数据库文件'),
         ):
-            if marker in tail:return reason
+            if marker.casefold() in tail.casefold():return reason
     except OSError:
         pass
     return '后端进程异常退出，详细原因见日志'

@@ -4,11 +4,11 @@
 
 ## 启动
 
-在仓库根目录运行 `./scripts/start_atlas.ps1`，访问 <http://127.0.0.1:4173/>。复用已有 Python 环境的 FastAPI/uvicorn，只启动独立 Atlas，不调用 Monitor。
+在仓库根目录运行 `./scripts/start_atlas.ps1`，访问 <http://127.0.0.1:14173/>。复用已有 Python 环境的 FastAPI/uvicorn，只启动独立 Atlas，不调用 Monitor。
 
 备用命令：
 ```powershell
-.\plugins\context_hygiene\.venv\Scripts\python.exe -m uvicorn plugins.conversation_atlas.backend.main:app --host 127.0.0.1 --port 4173
+.\plugins\context_hygiene\.venv\Scripts\python.exe -m uvicorn plugins.conversation_atlas.backend.main:app --host 127.0.0.1 --port 14173
 ```
 
 真实模式不能再用静态 http.server：它没有 API。数据库默认 `data/conversations.db`，沿用既有 `CONVERSATION_DB_PATH` 环境变量。数据库不存在 / schema 不兼容返回503，不创建或迁移库。按 Ctrl+C 停止服务。
@@ -22,7 +22,7 @@
 - 排序为首次观察时间 + SQLite rowid，未宣称原始顺序；时间为首次入库 / 最近同步，未宣称 ChatGPT 原始创建时间。
 - 搜索仅匹配已加载标题、摘录、ID，不是全文或语义搜索。
 - 空库、字段缺失、HTTP / JSON / 网络错误有明确状态；失败不回退 Mock。过期详情请求取消，避免快速切换串会话。
-- 原粒子、布局、曲线、Inspector关闭和返回保留。演示模式仅通过 <http://127.0.0.1:4173/?source=demo> 显式开启，清楚标为演示数据。
+- 原粒子、布局、曲线、Inspector关闭和返回保留。演示模式仅通过 <http://127.0.0.1:14173/?source=demo> 显式开启，清楚标为演示数据。
 
 ## 契约与独立性
 

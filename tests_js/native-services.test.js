@@ -32,14 +32,14 @@ test('Atlas starts independently and opens fixed graph URL only after health',as
     const w=makeWorker(op=>({ok:true,service:'Atlas',ready:op==='start_atlas'}));
     assert.equal((await w.send('open_atlas')).ok,true);
     assert.deepEqual(w.calls.map(c=>c.operation),['ping','check_atlas','start_atlas']);
-    assert.equal(w.tabs[0].url,'http://127.0.0.1:4173/');
+    assert.equal(w.tabs[0].url,'http://127.0.0.1:14173/');
 });
 
 test('ready Atlas reuses service and ignores any URL in native reply',async()=>{
     const w=makeWorker(()=>({ok:true,service:'Atlas',ready:true,url:'https://bad.invalid'}));
     await w.send('open_atlas');
     assert.deepEqual(w.calls.map(c=>c.operation),['ping','check_atlas']);
-    assert.equal(w.tabs[0].url,'http://127.0.0.1:4173/');
+    assert.equal(w.tabs[0].url,'http://127.0.0.1:14173/');
 });
 
 test('already healthy backends work even without Native Host and do not start peers',async()=>{
@@ -56,7 +56,7 @@ test('already healthy backends work even without Native Host and do not start pe
         assert.equal((await w.send(collector ? 'start_collector' : 'open_atlas')).ok,true);
         assert.equal(w.calls.length,0);
         assert.equal(w.tabs.length,collector ? 0 : 1);
-        assert.ok(urls.every(url=>url.startsWith(collector ? 'http://127.0.0.1:18000/' : 'http://127.0.0.1:4173/')));
+        assert.ok(urls.every(url=>url.startsWith(collector ? 'http://127.0.0.1:18000/' : 'http://127.0.0.1:14173/')));
     }
 });
 

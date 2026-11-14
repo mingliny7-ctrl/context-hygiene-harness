@@ -263,7 +263,7 @@ Conversation Atlas 真实数据切片（独立功能，等待 UI 验收）
 ```powershell
 .\scripts\start_atlas.ps1
 ```
-打开 http://127.0.0.1:4173/ 。独立 Atlas 只读现有 SQLite，无需启动 Monitor。
+打开 http://127.0.0.1:14173/ 。独立 Atlas 只读现有 SQLite，无需启动 Monitor。
 包含动态图谱、未分类 Conversation、Inspector、本地原文消息键定位及标题 / 摘录 / ID关键词搜索。
 显式演示模式为 `/?source=demo`；接口失败不回退演示数据。
 数据契约与限制见 `plugins/conversation_atlas/frontend/README.md`，验证结果见 `STATUS.md`。

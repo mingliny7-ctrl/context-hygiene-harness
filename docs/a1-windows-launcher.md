@@ -1,5 +1,7 @@
 # A1：Windows 本地服务启动器
 
+> 当前入口（2026-11-14）：可使用桌面 **Conversation Atlas** 快捷方式，或原有 Edge Collector Popup。Atlas 地址为 <http://127.0.0.1:14173/>；原 `4173` 已被本机 Windows 保留。扩展升级至 **1.0.7** 后需重载，无需重新注册 Native Host 或重建桌面快捷方式。当前服务操作见 [浏览器服务启动说明](browser-service-start.md)。下文为历史实现与验收记录。
+
 > 历史记录：后续“目标 A — 仅通过浏览器插件启动服务”已替代本设计。VBS 与 GUI 入口已取消，后台启动能力保留并由 Native Host 复用。不要再使用下文旧启动步骤。
 
 ## 使用

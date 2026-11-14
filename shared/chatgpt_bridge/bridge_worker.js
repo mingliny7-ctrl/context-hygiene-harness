@@ -159,7 +159,7 @@ async function handleUpdate(message, sender) {
 }
 
 const NATIVE_HOST = 'com.context_harness.desktop_host';
-const ATLAS_URL = 'http://127.0.0.1:4173/';
+const ATLAS_URL = 'http://127.0.0.1:14173/';
 const serviceActions = new Map();
 let serviceQueue = Promise.resolve();
 

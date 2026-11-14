@@ -1,11 +1,13 @@
 # 目标 A：仅通过 Collector Popup 启动服务
 
+> 当前入口（2026-11-14）：原有 Edge Collector Popup 与桌面 **Conversation Atlas** 快捷方式均可使用。Atlas 正式地址改为 <http://127.0.0.1:14173/>；原 `4173` 已被本机 Windows 纳入保留端口范围。升级后请重载原扩展至 **1.0.7**，以更新 Worker 地址与本地访问权限；无需重新注册 Native Host。已有桌面快捷方式不含端口，无需重建。下文历史验收记录保留当时地址。
+
 本文替代独立 Windows Launcher 的用户入口设计。A1 的后台进程管理保留在 `shared/desktop_host/launcher.py`；VBS 和 GUI 入口已取消，用户只使用原有 Edge Collector Popup。
 
 ## 用户操作
 
 - **启动服务 / 关闭服务**：每次打开 Popup 主动核验 Collector 身份和健康，运行时显示“关闭服务”，停止时显示“启动服务”；请求进行中禁用按钮，状态未知时明确提示。启动只影响 Collector；关闭通过该 checkout 的 Windows 退出事件通知 uvicorn 结束请求并退出，不按端口杀进程。旧方式启动、没有退出事件的服务明确拒绝强制关闭。
-- **打开图谱**：独立检查 Atlas；必要时仅启动 Atlas。确认健康后打开固定 `http://127.0.0.1:4173/`。失败不打开页面。Atlas 不依赖正在运行的 Collector，只读取共享历史库。
+- **打开图谱**：独立检查 Atlas；必要时仅启动 Atlas。确认健康后打开固定 `http://127.0.0.1:14173/`。失败不打开页面。Atlas 不依赖正在运行的 Collector，只读取共享历史库。
 
 SQLite 保存数量、最近回答预览和当前 Conversation 隔离继续使用既有逻辑；服务启动状态单独显示，不充当保存回执。没有新增历史页面或 Atlas 视觉变更。
 

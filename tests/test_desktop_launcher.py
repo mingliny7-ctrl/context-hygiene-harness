@@ -112,6 +112,7 @@ def test_startup_timeout_is_failure_not_ready(monkeypatch,tmp_path):
     ('No module named secret-private-name','Python 依赖缺失'),
     ('address already in use','监听端口已被占用'),
     ('PermissionError: [WinError 10013] bind','Windows 禁止绑定监听端口'),
+    ("bind on ('127.0.0.1', 4173): [winerror 10013]",'Windows 禁止绑定监听端口'),
 ])
 def test_failure_reason_ignores_previous_runs_and_never_echoes_raw_log(tmp_path,marker,expected):
     log=tmp_path/'service.log'

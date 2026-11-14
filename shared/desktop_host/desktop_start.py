@@ -3,9 +3,9 @@
 import ctypes
 import webbrowser
 
-from .launcher import Launcher
+from .launcher import Launcher, services
 
-ATLAS_URL = 'http://127.0.0.1:4173/'
+ATLAS_URL = services()[1].url + '/'
 
 
 def show_error(message):

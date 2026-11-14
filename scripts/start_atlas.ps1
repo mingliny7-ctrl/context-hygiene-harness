@@ -1,4 +1,4 @@
-param([ValidateRange(1024, 65535)][int]$Port = 4173)
+param([ValidateRange(1024, 65535)][int]$Port = 14173)
 
 $atlasDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\plugins\conversation_atlas\frontend'))
 $repositoryDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
