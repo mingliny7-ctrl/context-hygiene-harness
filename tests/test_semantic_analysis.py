@@ -168,7 +168,10 @@ def test_empty_placeholder_excluded_and_no_cross_conversation_input(tmp_path):
 
 def test_incomplete_output_and_missing_key_are_explicit(tmp_path):
     db=tmp_path/'source.db';seed(db);t,_=mock_model(finish='length')
-    with pytest.raises(AnalysisError,match='INCOMPLETE_RESPONSE'):run(db,t)
+    with pytest.raises(AnalysisError,match='INCOMPLETE_RESPONSE') as caught:run(db,t)
+    assert caught.value.stats['finish_reason']=='length'
+    assert caught.value.stats['usage']=={'prompt_tokens':200,'completion_tokens':100,'total_tokens':300}
+    assert 'content' not in caught.value.stats
     with pytest.raises(AnalysisError,match='CONFIG_MISSING'):
         analyze_conversation('A',config=LLMConfig(),db_path=db,transport=t)
 

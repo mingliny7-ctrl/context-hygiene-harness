@@ -10,6 +10,9 @@ export const indexReason = (code) => ({
   BUDGET_EXHAUSTED: '达到本次预算，已保留成功进度；可再次手动分析',
   TASK_BUSY: '另一个对话正在分析，请等待完成',
   OUTPUT_INVALID: '模型输出未通过校验，原有索引已保留',
+  INCOMPLETE_RESPONSE: '模型未返回完整结果，已保留原有索引，可重试',
+  OUTPUT_TRUNCATED: '模型输出达到上限，未提交不完整结果；可重试较小批次',
+  OPEN_COOLDOWN: '刚执行过自动分析，请稍后再打开；也可选择对话手动继续',
   TOPIC_TOO_LARGE: '当前主题超出模型完整输入容量，原文未截断',
   CONCEPT_COVERAGE_INVALID: '概念分块未完整覆盖本主题来源',
   INDEX_CHANGED: '主题索引已更新，请重新核对',
@@ -18,7 +21,7 @@ export const indexReason = (code) => ({
   AUTH_FAILED: '模型密钥未通过验证', INSUFFICIENT_BALANCE: '模型账户余额不足',
   REQUEST_TIMEOUT: '模型请求超时，未完成范围仍待分析', MODEL_UNAVAILABLE: '暂时无法连接模型服务',
   SOURCE_CHANGED: '分析期间原文变化，未提交过期结果',
-}[code] || (code ? `暂未完成：${code}` : ''));
+}[code] || (code?.startsWith('OUTPUT_INVALID:') ? '模型结构校验未通过，已有索引保留，可重试' : code ? `暂未完成：${code}` : ''));
 
 export async function indexRequest(path, method = 'GET', fetchImpl = globalThis.fetch) {
   const response = await fetchImpl(path, {method, cache:'no-store',
@@ -27,6 +30,40 @@ export async function indexRequest(path, method = 'GET', fetchImpl = globalThis.
   const value = await response.json();
   if (!response.ok) throw new Error(indexReason(value.detail?.code) || value.detail || `服务返回 HTTP ${response.status}`);
   return value;
+}
+
+export class OpenAnalysisControls {
+  constructor({status,onUpdate,fetchImpl=globalThis.fetch}) {
+    Object.assign(this,{status,onUpdate,fetchImpl});
+    this.started=false; this.active=false; this.busy=false; this.signature=null;
+  }
+  async read(method) {
+    const response=await this.fetchImpl('/api/atlas/auto-index',{method,cache:'no-store',
+      headers:method==='POST'?{'x-atlas-action':'open-analysis'}:{},signal:AbortSignal.timeout(15000)});
+    const task=await response.json();
+    if (!response.ok) throw new Error(indexReason(task.detail?.code)||'自动分析状态暂不可用');
+    this.active=['queued','running'].includes(task.status);
+    const signature=JSON.stringify(task);
+    if(this.signature && signature!==this.signature) this.onUpdate();
+    this.signature=signature;
+    this.status.textContent=this.active?'正在自动检查并分析新增内容…':
+      task.status==='failed'?`自动分析未完成：${indexReason(task.errorCode)}`:
+      task.status==='paused'?`本次自动分析已暂停 · ${indexReason(task.errorCode)}`:
+      task.skipped?`自动检查完成 · ${task.skipped} 项待复核或重试`:
+      task.requests?`自动分析完成 · ${task.requests} 次请求`:'已自动检查 · 没有可分析的新增内容';
+    return task;
+  }
+  async open() {
+    if(this.started) return;
+    this.started=true;
+    try {await this.read('POST');} catch(error) {this.status.textContent=error.message;}
+  }
+  async refresh() {
+    if(!this.active || this.busy) return;
+    this.busy=true;
+    try {await this.read('GET');} catch(error) {this.status.textContent=error.message;}
+    finally {this.busy=false;}
+  }
 }
 
 export class IndexControls {
@@ -73,7 +110,6 @@ export class IndexControls {
       await indexRequest(`/api/atlas/index/${encodeURIComponent(cid)}`, 'POST', this.fetchImpl);
     } catch (error) {
       if (generation === this.generation) { this.actionError = error.message; this.status.textContent = error.message; }
-      return;
     } finally {
       if (generation === this.generation) this.busy = false;
     }

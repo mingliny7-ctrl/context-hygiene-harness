@@ -1,7 +1,7 @@
 import { loadAtlas, loadConversation, searchAtlas, atlasChanged } from './data/atlas-source.mjs';
 import { VisiblePoller } from './polling.mjs';
 import { openMessages, openAnswer } from './messages.mjs';
-import { IndexControls, indexRequest, indexReason } from './index-controls.mjs';
+import { IndexControls, OpenAnalysisControls, indexRequest, indexReason } from './index-controls.mjs';
 import { computeLayout, bezierPath, contentBlocks } from './layout.mjs';
 import { ParticleField } from './particles.mjs';
 
@@ -35,6 +35,7 @@ let latestResults = [];
 let detailController;
 let detailGeneration = 0;
 let indexControls;
+let openAnalysisControls;
 let pollTimer;
 let refreshingGraph = false;
 let refinementView = null;
@@ -636,7 +637,7 @@ try {
   $('search-input').setAttribute('aria-label', isReal() ? '搜索已存储会话' : '搜索演示对话');
   if (isReal()) {
     $('search-scope').textContent = '标题 / 摘录 / ID · 关键词匹配';
-    $('guide-note').textContent = '当前读取 SQLite 与已完成索引。主题可手动细分为概念，调用前展示预算；打开和切换页面不调用模型。关键回答可定位完整原文。尚未采集的历史仍未知。';
+    $('guide-note').textContent = '打开 Atlas 自动检查并按本次预算分析新增内容，已完成索引直接复用。失败范围可用分析按钮重试；主题概念细分仍需确认预算。尚未采集的历史仍未知。';
     const q = data.quality || {};
   }
   const stats = isReal() ? [[data.quality?.storedConversationCount || 0, '存储会话'], [data.quality?.messageCount || 0, '已采集消息'], [data.quality?.storedSegmentCount || 0, '已索引主题']] : [ [data.categories.length, '主题星球'], [data.conversations.length, '段对话'], [data.segments.length, '个讨论阶段'] ];
@@ -648,10 +649,13 @@ try {
   setupEvents();
   if (isReal()) {
     indexControls = new IndexControls({button:$('analyze-new'),scope:$('analysis-scope'),status:$('analysis-status'),onUpdate:refreshGraph});
+    openAnalysisControls = new OpenAnalysisControls({status:$('auto-analysis-status'),onUpdate:refreshGraph});
+    openAnalysisControls.open();
     pollTimer = new VisiblePoller(async () => {
       await refreshGraph(true);
       await indexControls.refresh();
       await refreshRefinement();
+      await openAnalysisControls.refresh();
     });
     pollTimer.start();
   }

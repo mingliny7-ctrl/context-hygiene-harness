@@ -162,6 +162,43 @@ def test_complete_discussion_larger_than_old_22kb_limit_is_indexed(index):
     runner.close()
 
 
+def test_long_multi_turn_input_uses_complete_smaller_windows(index):
+    messages = [msg(n, '正文' * 1800) for n in range(1, 9)]
+    save_observation('A', messages, index.source_db, observed_order=[m['key'] for m in messages])
+    provider = FakeProvider()
+    runner = SemanticIndexer(index, lambda: provider, budget=Budget(requests=4, output_tokens=16384))
+    try:
+        runner.start('A')
+        assert wait(runner)['status'] == 'completed'
+        assert len(provider.calls) == 4
+        assert [m['key'] for call in provider.calls for m in call['pending']] == [m['key'] for m in messages]
+        assert all(len(call['pending']) == 2 for call in provider.calls)
+    finally:
+        runner.close()
+
+
+def test_truncated_response_records_usage_and_specific_error_without_bad_commit(index):
+    seed(index, [1, 2])
+    provider = FakeProvider()
+    def truncated(system, user):
+        provider.calls.append(json.loads(user))
+        error = AnalysisError('INCOMPLETE_RESPONSE', 'Truncated')
+        error.stats = {'finish_reason': 'length', 'request_id': 'test-truncated',
+                       'usage': {'prompt_tokens': 150, 'completion_tokens': 4096}}
+        raise error
+    provider.complete = truncated
+    runner = SemanticIndexer(index, lambda: provider)
+    try:
+        runner.start('A')
+        task = wait(runner)
+        assert task['error_code'] == 'OUTPUT_TRUNCATED'
+        assert json.loads(task['calls'][0]['usage_json'])['completion_tokens'] == 4096
+        assert task['input_tokens'] == 150
+        assert index.inspect('A')['unchanged'] == []
+    finally:
+        runner.close()
+
+
 def test_model_capacity_still_prevents_truncated_or_oversized_request(index):
     seed(index, [1, 2])
     with sqlite3.connect(index.source_db) as c:
@@ -428,3 +465,25 @@ def test_topic_can_accumulate_concepts_beyond_one_request_limit(index):
             validate_output(json.dumps(too_many), plan, job['batch_id'])
     finally:
         runner.close()
+
+
+def test_topic_extension_preserves_more_than_ten_cumulative_outcomes(index):
+    provider=FakeProvider()
+    original=provider.complete
+    def with_outcomes(system,user):
+        response=original(system,user)
+        value=json.loads(response['content'])
+        segment=value['segments'][0]
+        segment['analysis']['outcomes']=[f'有来源的结论{i}' for i in range(6)]
+        segment['analysis']['outcome_evidence']=[{'outcome_index':i,'sources':[{'message_id':segment['message_ids'][-1]}]} for i in range(6)]
+        response['content']=json.dumps(value)
+        return response
+    provider.complete=with_outcomes
+    runner=SemanticIndexer(index,lambda:provider)
+    try:
+        seed(index,[1,2]);runner.start('A');assert wait(runner)['status']=='completed'
+        seed(index,[1,2,3,4]);runner.start('A');assert wait(runner)['status']=='completed'
+        result=index.read_segments('A')['segments'][0]['analysis']
+        assert len(result['outcomes'])==12
+        assert [e['outcome_index'] for e in result['outcome_evidence']]==list(range(12))
+    finally:runner.close()

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {IndexControls} from '../index-controls.mjs';
+import {IndexControls,OpenAnalysisControls} from '../index-controls.mjs';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function controls(fetchImpl) {
   const node=()=>({disabled:false,textContent:'',addEventListener(_,fn){this.click=fn;}});
@@ -34,4 +34,37 @@ test('late response from A cannot overwrite selected B',async()=>{
   const c=controls(async url=>{if(url.endsWith('/A'))await new Promise(r=>finish=r);return {ok:true,json:async()=>result(url.endsWith('/A')?'A':'B',url.endsWith('/A')?99:4)};});
   c.controller.select('A','A');c.controller.select('B','B');await flush();finish();await flush();
   assert.match(c.scope.textContent,/B/);assert.match(c.status.textContent,/待分析 4 条/);assert.doesNotMatch(c.status.textContent,/99/);
+});
+
+test('failed POST restores an enabled retry button and visible error',async()=>{
+  const c=controls(async(_,options)=>options.method==='POST'
+    ? {ok:false,json:async()=>({detail:{code:'TASK_BUSY'}})}
+    : {ok:true,json:async()=>result('A',2)});
+  c.controller.select('A','A');await flush();await c.controller.start();
+  assert.equal(c.button.disabled,false);
+  assert.match(c.status.textContent,/等待/);
+});
+
+test('page open starts once, later polling only reads and completion refreshes graph',async()=>{
+  const calls=[];let task={status:'running',requests:0};let updates=0;
+  const status={textContent:''};
+  const control=new OpenAnalysisControls({status,onUpdate(){updates++;},fetchImpl:async(path,options)=>{
+    calls.push(options.method);
+    if(options.method==='POST')assert.equal(options.headers['x-atlas-action'],'open-analysis');
+    return {ok:true,json:async()=>task};
+  }});
+  await control.open();await control.open();await control.refresh();
+  assert.deepEqual(calls,['POST','GET']);
+  task={status:'completed',requests:1,completed:1};await control.refresh();await control.refresh();
+  assert.deepEqual(calls,['POST','GET','GET']);
+  assert.equal(updates,1);assert.match(status.textContent,/自动分析完成/);
+});
+
+test('no-change page open makes no repeated automatic POST',async()=>{
+  const calls=[];const status={textContent:''};
+  const control=new OpenAnalysisControls({status,onUpdate(){},fetchImpl:async(path,options)=>{
+    calls.push(options.method);return {ok:true,json:async()=>({status:'completed',requests:0})};
+  }});
+  await control.open();await control.refresh();await control.open();
+  assert.deepEqual(calls,['POST']);assert.match(status.textContent,/没有可分析/);
 });

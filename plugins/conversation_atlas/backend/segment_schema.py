@@ -1,6 +1,6 @@
 """Optional, source-backed organization inside a Segment; no additional tables."""
 from pydantic import BaseModel, ConfigDict, Field
-from .analysis import SemanticAnalysis, KeyAssistantAnswer
+from .analysis import SemanticAnalysis, KeyAssistantAnswer, Text, OutcomeEvidence
 
 
 class ConceptRefinement(BaseModel):
@@ -25,6 +25,8 @@ class ContentBlock(BaseModel):
 
 
 class SegmentAnalysis(SemanticAnalysis):
+    outcomes: list[Text]
+    outcome_evidence: list[OutcomeEvidence]
     # A persisted topic can accumulate valid blocks across multiple batches.
     subtopics: list[ContentBlock] = Field(default_factory=list)
     concept_refinement: ConceptRefinement | None = None

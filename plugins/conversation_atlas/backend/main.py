@@ -17,6 +17,7 @@ from .segment_api import segment_nodes, exact_answer
 from .management import AtlasManagement, ManagementError
 from .revision import graph_revision
 from .concept_refinement import ConceptRefiner
+from .auto_index import OpenAnalysis
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 logger = logging.getLogger(__name__)
@@ -71,15 +72,18 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
     indexer = SemanticIndexer(index, provider_factory, budget)
     refiner = ConceptRefiner(index, provider_factory, initialize=indexer.initialize)
     management = AtlasManagement(index.source_db, index.path)
+    auto_index = OpenAnalysis(indexer, management)
     @asynccontextmanager
     async def lifespan(app):
-        yield  # No migrations, model configuration or inference on startup.
+        yield  # A page-open POST triggers analysis; importing/starting the service does not.
+        auto_index.close()
         indexer.close()
         refiner.close()
     app = FastAPI(title="Conversation Atlas · read-only Store integration", lifespan=lifespan)
     app.state.indexer = indexer
     app.state.management = management
     app.state.refiner = refiner
+    app.state.auto_index = auto_index
 
     def management_action(request: Request):
         origin = request.headers.get('origin')
@@ -251,6 +255,20 @@ def create_app(db_path: str | Path | None = None, analysis_db_path: str | Path |
     def index_state(conversation_id: str):
         return {'conversationId': conversation_id, 'source': index.inspect(conversation_id),
                 'task': indexer.latest(conversation_id), 'budget': indexer.budget.__dict__}
+
+    @app.get('/api/atlas/auto-index')
+    def open_analysis_state():
+        return auto_index.status()
+
+    @app.post('/api/atlas/auto-index', status_code=202)
+    def open_analysis(request: Request):
+        origin = request.headers.get('origin')
+        if request.headers.get('x-atlas-action') != 'open-analysis' or (origin and origin != str(request.base_url).rstrip('/')):
+            raise HTTPException(403, '仅接受 Atlas 页面打开时发起的分析。')
+        try:
+            return auto_index.start()
+        except IndexErrorState as error:
+            raise HTTPException(409, detail={'code':str(error)}) from error
 
     @app.post('/api/atlas/index/{conversation_id}', status_code=202)
     def manual_index(conversation_id: str, request: Request):

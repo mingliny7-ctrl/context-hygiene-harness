@@ -156,6 +156,8 @@
 }
 
 /* Focused planet is the Conversation; topics and concepts branch directly right. */
+.auto-analysis-status{position:absolute;top:94px;right:38px;max-width:65%;font-size:11px;line-height:1.5;color:#a9b5a7;text-align:right;pointer-events:none}
+@media(max-width:760px){.auto-analysis-status{top:auto;bottom:26px;right:20px;max-width:90%;font-size:10px}}
 .atlas-app.expanded .core-label.conversation-label{opacity:1;max-width:240px;white-space:normal;pointer-events:auto}
 .conversation-label .core-eyebrow{display:none}
 .conversation-label #core-title{font-size:16px;line-height:1.6;margin:0;overflow-wrap:anywhere}

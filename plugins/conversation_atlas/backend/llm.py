@@ -15,6 +15,7 @@ class AnalysisError(Exception):
     def __init__(self, code, detail, attempts=None):
         self.code, self.detail, self.attempts = code, detail, attempts or []
         self.diagnostics = []
+        self.stats = {}
         super().__init__(f'{code}: {detail}')
 
 
@@ -105,7 +106,10 @@ class DeepSeekProvider:
             raise AnalysisError('INCOMPLETE_RESPONSE','Missing unique completion choice')
         choice=choices[0]
         if choice.get('finish_reason')!='stop' or not isinstance(choice.get('message'),dict):
-            raise AnalysisError('INCOMPLETE_RESPONSE','Generation was truncated, filtered or incomplete')
+            error = AnalysisError('INCOMPLETE_RESPONSE','Generation was truncated, filtered or incomplete')
+            error.stats = {'finish_reason': choice.get('finish_reason'), 'request_id': body.get('id'),
+                           'usage': body.get('usage') or {}}
+            raise error
         message=choice['message']
         if message.get('role')!='assistant' or message.get('tool_calls'):
             raise AnalysisError('INCOMPLETE_RESPONSE','Only a final textual Assistant answer is accepted; no tools are executed')

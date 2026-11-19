@@ -207,7 +207,7 @@ class IncrementalIndex:
             # Concept navigation and its local receipt are not model context;
             # retain them separately for lossless extension at commit time.
             context['segment']['analysis'] = {k: v for k, v in tail_analysis.items()
-                                               if k not in ('subtopics', 'concept_refinement')}
+                                               if k not in ('subtopics', 'concept_refinement', 'outcomes', 'outcome_evidence')}
             if len(encoded(context).encode()) > max_context_bytes:
                 raise IndexErrorState('CONTEXT_TOO_LARGE')
             for old in reversed(members):
